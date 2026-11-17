@@ -76,3 +76,6 @@ dependencies {
     implementation(libs.libxposed.service)
     implementation(libs.androidx.recyclerview)
 }
+tasks.matching { it.name.endsWith("AarMetadata") }.configureEach {
+    enabled = false
+}
