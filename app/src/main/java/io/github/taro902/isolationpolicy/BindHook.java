@@ -1,4 +1,4 @@
-package io.github.mhmrdd.isolationpolicy;
+package io.github.taro902.isolationpolicy;
 
 import android.content.ComponentName;
 import android.content.SharedPreferences;

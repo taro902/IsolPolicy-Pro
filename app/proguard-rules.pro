@@ -10,13 +10,13 @@
     public void onPackageReady(io.github.libxposed.api.XposedModuleInterface$PackageReadyParam);
 }
 
--keep class io.github.mhmrdd.isolationpolicy.Entry { *; }
--keep class io.github.mhmrdd.isolationpolicy.Constants { *; }
--keep class io.github.mhmrdd.isolationpolicy.ModuleStatus { *; }
--keep class io.github.mhmrdd.isolationpolicy.AppZygote { *; }
--keep class io.github.mhmrdd.isolationpolicy.IsolationPolicyService { *; }
--keep class io.github.mhmrdd.isolationpolicy.IIsolationPolicyService { *; }
--keep class io.github.mhmrdd.isolationpolicy.IIsolationPolicyService$* { *; }
+-keep class io.github.taro902.isolationpolicy.Entry { *; }
+-keep class io.github.taro902.isolationpolicy.Constants { *; }
+-keep class io.github.taro902.isolationpolicy.ModuleStatus { *; }
+-keep class io.github.taro902.isolationpolicy.AppZygote { *; }
+-keep class io.github.taro902.isolationpolicy.IsolationPolicyService { *; }
+-keep class io.github.taro902.isolationpolicy.IIsolationPolicyService { *; }
+-keep class io.github.taro902.isolationpolicy.IIsolationPolicyService$* { *; }
 
 -repackageclasses "isolationpolicy"
 -allowaccessmodification

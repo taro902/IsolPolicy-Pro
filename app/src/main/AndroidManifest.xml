@@ -8,7 +8,7 @@
         android:description="@string/module_description"
         android:allowBackup="false"
         android:supportsRtl="true"
-        android:zygotePreloadName="io.github.mhmrdd.isolationpolicy.AppZygote">
+        android:zygotePreloadName="io.github.taro902.isolationpolicy.AppZygote">
 
         <activity
             android:name=".MainActivity"

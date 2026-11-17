@@ -1,4 +1,4 @@
-package io.github.mhmrdd.isolationpolicy;
+package io.github.taro902.isolationpolicy;
 
 import androidx.annotation.NonNull;
 
@@ -36,7 +36,7 @@ public final class Entry extends XposedModule {
 
     private void hookSelf(ClassLoader cl) {
         try {
-            Class<?> c = Class.forName("io.github.mhmrdd.isolationpolicy.ModuleStatus", false, cl);
+            Class<?> c = Class.forName("io.github.taro902.isolationpolicy.ModuleStatus", false, cl);
             Method m = c.getDeclaredMethod("isActive");
             hook(m)
                 .setPriority(PRIORITY_HIGHEST)

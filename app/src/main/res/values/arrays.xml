@@ -2,6 +2,6 @@
 <resources>
     <string-array name="scope">
         <item>android</item>
-        <item>io.github.mhmrdd.isolationpolicy</item>
+        <item>io.github.taro902.isolationpolicy</item>
     </string-array>
 </resources>

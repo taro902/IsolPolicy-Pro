@@ -1,4 +1,4 @@
-package io.github.mhmrdd.isolationpolicy;
+package io.github.taro902.isolationpolicy;
 
 import android.app.ZygotePreload;
 import android.content.pm.ApplicationInfo;

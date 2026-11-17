@@ -9,11 +9,11 @@ val keyPass: String? = System.getenv("KEYPASS")
 val haveReleaseSigning = !keystorePath.isNullOrEmpty() && file(keystorePath).exists()
 
 android {
-    namespace = "io.github.mhmrdd.isolationpolicy"
+    namespace = "io.github.taro902.isolationpolicy"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "io.github.mhmrdd.isolationpolicy"
+        applicationId = "io.github.taro902.isolationpolicy"
         minSdk = 29
         targetSdk = 34
         versionCode = 3
