@@ -16,8 +16,8 @@ android {
         applicationId = "io.github.mhmrdd.isolationpolicy"
         minSdk = 29
         targetSdk = 34
-        versionCode = 200
-        versionName = "2.0-API102"
+        versionCode = 3
+        versionName = "2.0"
     }
 
     signingConfigs {
@@ -57,6 +57,8 @@ android {
     packaging {
         resources {
             merges += "META-INF/xposed/*"
+            merges += "META-INF/NOTICE*"
+            merges += "META-INF/LICENSE*"
             excludes += "META-INF/*.version"
             excludes += "META-INF/proguard/*"
             excludes += "META-INF/*.kotlin_module"
