@@ -22,16 +22,16 @@ public final class IsolationPolicyService extends Service {
     private static String buildReport() {
         StringBuilder sb = new StringBuilder();
         boolean preloadRan = AppZygote.preloadAtMillis != 0L;
-        sb.append("preload     : ").append(preloadRan ? "ran in app_zygote" : "blocked (safe isolated_app)");
+        sb.append("preload          : ").append(preloadRan ? "EXPOSED (ran in app_zygote)" : "neutralized ( bypassed app_zygote )");
         if (preloadRan) {
             String ctx = AppZygote.preloadCtx;
-            sb.append("\nctx@preload : ").append(ctx != null && !ctx.isEmpty() ? ctx : "<unknown>");
-            sb.append("\npreload-at  : ").append(AppZygote.preloadAtMillis).append(" ms");
+            sb.append("\nctx@preload      : ").append(ctx != null && !ctx.isEmpty() ? ctx : "<unknown>");
+            sb.append("\npreload-at       : ").append(AppZygote.preloadAtMillis).append(" ms");
         }
         String live = AppZygote.readSelfContext();
-        sb.append("\nctx@now     : ").append(live != null ? live : "<unknown>");
-        sb.append("\nisolated    : ").append(Process.isIsolated());
-        sb.append("\nuid         : ").append(AppZygote.currentUid());
+        sb.append("\nctx@now          : ").append(live != null ? live : "<unknown>");
+        sb.append("\nisolated         : ").append(Process.isIsolated());
+        sb.append("\nuid              : ").append(AppZygote.currentUid());
         return sb.toString();
     }
 }
