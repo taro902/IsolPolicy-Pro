@@ -12,7 +12,10 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
+import android.content.res.AssetManager;
 import android.content.res.ColorStateList;
+import android.content.res.Resources;
+import android.content.res.XmlResourceParser;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
@@ -46,9 +49,9 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.xmlpull.v1.XmlPullParser;
 
 import java.lang.ref.WeakReference;
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -62,6 +65,7 @@ import io.github.libxposed.service.XposedServiceHelper;
 
 public class MainActivity extends Activity {
 
+    private static final String ANDROID_NS = "http://schemas.android.com/apk/res/android";
     private static final long FILTER_DEBOUNCE_MS = 60L;
     private static final long TEST_BIND_TIMEOUT_MS = 6000L;
 
@@ -388,6 +392,37 @@ public class MainActivity extends Activity {
         Toast.makeText(this, added > 0 ? ("Auto-selected " + added + " new threat package(s)") : "All detected threat packages are already selected", Toast.LENGTH_SHORT).show();
     }
 
+    private static String extractManifestZygotePreload(PackageManager pm, ApplicationInfo ai) {
+        XmlResourceParser parser = null;
+        try {
+            Resources res = pm.getResourcesForApplication(ai);
+            AssetManager assets = res.getAssets();
+            parser = assets.openXmlResourceParser("AndroidManifest.xml");
+            int eventType = parser.getEventType();
+            while (eventType != XmlPullParser.END_DOCUMENT) {
+                if (eventType == XmlPullParser.START_TAG) {
+                    String tag = parser.getName();
+                    if ("application".equals(tag)) {
+                        String preload = parser.getAttributeValue(ANDROID_NS, "zygotePreloadName");
+                        if (preload != null && !preload.isEmpty()) {
+                            return preload;
+                        }
+                        break;
+                    }
+                }
+                eventType = parser.next();
+            }
+        } catch (Throwable ignored) {
+        } finally {
+            if (parser != null) {
+                try {
+                    parser.close();
+                } catch (Throwable ignored) {}
+            }
+        }
+        return null;
+    }
+
     private class ScanRunnable implements Runnable {
         @Override
         public void run() {
@@ -399,12 +434,6 @@ public class MainActivity extends Activity {
             int isolatedTotal = 0;
             String selfPkg = Constants.APPLICATION_ID;
 
-            Field preloadField = null;
-            try {
-                preloadField = ApplicationInfo.class.getDeclaredField("zygotePreloadName");
-                preloadField.setAccessible(true);
-            } catch (Throwable ignored) {}
-
             for (ApplicationInfo ai : all) {
                 boolean isSelf = selfPkg.equals(ai.packageName);
                 boolean isSystem = ai.uid < 10000
@@ -413,16 +442,6 @@ public class MainActivity extends Activity {
                 Item.Kind k = isSelf ? Item.Kind.SELF
                         : isSystem ? Item.Kind.SYSTEM
                         : Item.Kind.USER;
-
-                boolean hasPreload = false;
-                if (preloadField != null) {
-                    try {
-                        Object val = preloadField.get(ai);
-                        if (val instanceof String && !((String) val).isEmpty()) {
-                            hasPreload = true;
-                        }
-                    } catch (Throwable ignored) {}
-                }
 
                 boolean hasAppZygote = false;
                 boolean hasIsolated = false;
@@ -444,6 +463,12 @@ public class MainActivity extends Activity {
                     }
                 } catch (Throwable ignored) {}
 
+                String preloadClass = null;
+                if (hasAppZygote || hasIsolated) {
+                    preloadClass = extractManifestZygotePreload(pm, ai);
+                }
+                boolean hasPreload = preloadClass != null && !preloadClass.isEmpty();
+
                 String label;
                 try {
                     label = ai.loadLabel(pm).toString();
@@ -455,7 +480,7 @@ public class MainActivity extends Activity {
                     icon = ai.loadIcon(pm);
                 } catch (Throwable ignored) {}
 
-                built.add(new Item(ai.packageName, label, icon, k, hasAppZygote, hasPreload, hasIsolated, appZygoteSvcCount));
+                built.add(new Item(ai.packageName, label, icon, k, hasAppZygote, hasPreload, hasIsolated, appZygoteSvcCount, preloadClass));
                 boolean selectable = k == Item.Kind.USER || (mAllowSystem && k == Item.Kind.SYSTEM);
                 if (selectable) {
                     eligible++;
@@ -872,9 +897,11 @@ public class MainActivity extends Activity {
         final boolean hasPreload;
         final boolean hasIsolated;
         final int appZygoteSvcCount;
+        final String preloadClass;
+        final String preloadLower;
 
         Item(String pkg, String label, Drawable icon, Kind kind,
-             boolean hasAppZygote, boolean hasPreload, boolean hasIsolated, int svcCount) {
+             boolean hasAppZygote, boolean hasPreload, boolean hasIsolated, int svcCount, String preloadClass) {
             this.pkg = pkg;
             this.label = label;
             this.labelLower = label.toLowerCase();
@@ -885,6 +912,8 @@ public class MainActivity extends Activity {
             this.hasPreload = hasPreload;
             this.hasIsolated = hasIsolated;
             this.appZygoteSvcCount = svcCount;
+            this.preloadClass = preloadClass != null ? preloadClass : "";
+            this.preloadLower = this.preloadClass.toLowerCase();
         }
     }
 
@@ -945,6 +974,7 @@ public class MainActivity extends Activity {
                 if (!mAdapterFilter.isEmpty()) {
                     boolean matchText = it.labelLower.contains(mAdapterFilter)
                             || it.pkgLower.contains(mAdapterFilter)
+                            || (!it.preloadLower.isEmpty() && it.preloadLower.contains(mAdapterFilter))
                             || (it.hasAppZygote && "app_zygote".contains(mAdapterFilter))
                             || (it.hasPreload && "preload".contains(mAdapterFilter))
                             || (it.hasIsolated && "isolated".contains(mAdapterFilter));
@@ -1117,7 +1147,12 @@ public class MainActivity extends Activity {
                 bText.append("[APP_ZYGOTE x").append(it.appZygoteSvcCount).append("] ");
             }
             if (it.hasPreload) {
-                bText.append("[ZYGOTE_PRELOAD] ");
+                String shortPreload = it.preloadClass;
+                int dot = shortPreload.lastIndexOf('.');
+                if (dot >= 0 && dot + 1 < shortPreload.length()) {
+                    shortPreload = shortPreload.substring(dot + 1);
+                }
+                bText.append("[PRELOAD: ").append(shortPreload).append("] ");
             }
             if (!it.hasAppZygote && !it.hasPreload && it.hasIsolated) {
                 bText.append("[ISOLATED_SVC]");

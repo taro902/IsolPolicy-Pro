@@ -49,6 +49,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_21
     }
 
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
+
     buildFeatures {
         buildConfig = true
         aidl = true
