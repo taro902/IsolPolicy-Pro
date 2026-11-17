@@ -75,5 +75,4 @@ dependencies {
     compileOnly(libs.libxposed.api)
     implementation(libs.libxposed.service)
     implementation(libs.androidx.recyclerview)
-    compileOnly(libs.androidx.annotation)
 }
