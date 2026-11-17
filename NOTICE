@@ -1,19 +1,24 @@
 IsolPolicy (Derivative Work - v2.0)
+Package Namespace: io.github.taro902.isolationpolicy
 Licensed under the Apache License, Version 2.0.
 
 This product includes software originally developed by:
 MhmRdd (Mohammed Riad) - https://github.com/MhmRdd/Isolation-Policy
+Original Package Namespace: io.github.mhmrdd.isolationpolicy
 Copyright 2025-2026 MhmRdd
 
 Summary of Modifications (Apache License 2.0, Section 4(b)):
-1. Migrated Xposed framework integration from legacy API 82 (de.robv.android.xposed)
+1. Refactored package namespace from io.github.mhmrdd.isolationpolicy to
+   io.github.taro902.isolationpolicy to distinguish this derivative build from upstream.
+2. Migrated Xposed framework integration from legacy API 82 (de.robv.android.xposed)
    to libxposed API 102 (io.github.libxposed:api:102.0.0 and service:102.0.0).
-2. Modified Entry.java, BindHook.java, MainActivity.java, Constants.java,
+3. Modified Entry.java, BindHook.java, MainActivity.java, Constants.java,
    IsolationPolicyService.java, Logger.java, AndroidManifest.xml, and Gradle build
-   configurations to implement in-flight HostingRecord regular-zygote downgrade,
-   ART method deoptimization, lock-free AtomicReference policy caching, and
-   RemotePreferences Binder IPC synchronization.
-3. Added META-INF/xposed/{module.prop,java_init.list,scope.list} metadata and
+   configurations to implement 4-layer cross-thread HostingRecord downgrade,
+   binary AXML manifest threat scanning, per-package mode overrides, ART method
+   deoptimization, lock-free AtomicReference policy caching, and RemotePreferences
+   Binder IPC synchronization.
+4. Added META-INF/xposed/{module.prop,java_init.list,scope.list} metadata and
    removed legacy assets/xposed_init.
 
 This fork is an independent derivative work and is not endorsed by or affiliated
