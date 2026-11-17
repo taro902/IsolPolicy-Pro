@@ -5,9 +5,13 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
@@ -15,21 +19,21 @@ jobs:
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
+          distribution: temurin
           java-version: '21'
-          distribution: 'temurin'
+
+      - name: Setup Android SDK 36
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'tools platform-tools platforms;android-36 build-tools;36.0.0'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.13'
-
-      - name: Accept Android SDK Licenses
-        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
 
       - name: Generate Signing Keystore
         run: |
           keytool -genkeypair -v \
-            -keystore release.jks \
+            -keystore "$RUNNER_TEMP/release.jks" \
             -alias isolationpolicy \
             -keyalg EC \
             -keysize 256 \
@@ -37,16 +41,41 @@ jobs:
             -storepass IsolPolicy2026 \
             -keypass IsolPolicy2026 \
             -dname "CN=Android, OU=Android, O=Google Inc., L=Mountain View, ST=California, C=US"
+          echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "KEYSTORE_PASS=IsolPolicy2026" >> "$GITHUB_ENV"
+          echo "KEYPASS=IsolPolicy2026" >> "$GITHUB_ENV"
 
-      - name: Build Signed Release APK
-        env:
-          KEYSTORE_PATH: ${{ github.workspace }}/release.jks
-          KEYSTORE_PASS: IsolPolicy2026
-          KEYPASS: IsolPolicy2026
-        run: gradle assembleRelease --no-daemon
+      - name: Assemble Release and Debug APKs
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :app:assembleRelease :app:assembleDebug --no-daemon
 
-      - name: Upload Compiled APK Artifact
+      - name: Stage Compiled APKs
+        id: stage
+        run: |
+          rel=$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)
+          dbg=$(find app/build/outputs/apk/debug -name '*.apk' | head -n 1)
+          mkdir -p "$RUNNER_TEMP/out"
+          cp "$rel" "$RUNNER_TEMP/out/IsolPolicy-v2.0-API102-release.apk"
+          cp "$dbg" "$RUNNER_TEMP/out/IsolPolicy-v2.0-API102-debug.apk"
+          {
+            echo "release=$RUNNER_TEMP/out/IsolPolicy-v2.0-API102-release.apk"
+            echo "debug=$RUNNER_TEMP/out/IsolPolicy-v2.0-API102-debug.apk"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: IsolPolicy-v2.0-API102-Release
-          path: app/build/outputs/apk/release/*.apk
+          name: IsolPolicy-v2.0-API102-APKs
+          path: ${{ runner.temp }}/out/*.apk
+
+      - name: Publish to GitHub Releases
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2.6.2
+        with:
+          tag_name: v2.0-api102
+          name: IsolPolicy v2.0 (libxposed API 102)
+          prerelease: false
+          files: |
+            ${{ steps.stage.outputs.release }}
+            ${{ steps.stage.outputs.debug }}

@@ -1,3 +1,4 @@
+-dontwarn io.github.libxposed.**
 -adaptresourcefilecontents META-INF/xposed/java_init.list
 -keepattributes RuntimeVisibleAnnotations
 

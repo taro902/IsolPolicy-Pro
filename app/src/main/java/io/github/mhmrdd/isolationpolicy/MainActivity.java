@@ -129,7 +129,6 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        XposedServiceHelper.unregisterListener(mServiceListener);
         cancelPendingTest();
         mBgThread.quitSafely();
         super.onDestroy();
