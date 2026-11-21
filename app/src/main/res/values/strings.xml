@@ -1,4 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">IsolPolicy</string>
-    <string name="module_description">Intercepts and neutralizes useAppZygote spawns with silent regular-zygote downgrade or hard drop.</string>
+    <string name="module_desc">7-Pillar server-side AppZygote, Isolated Folding, and Coherent Environment Shield (API 102)</string>
 </resources>

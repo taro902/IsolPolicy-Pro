@@ -1,4 +1,3 @@
 plugins {
-    alias(libs.plugins.android.application) apply false
-    alias(libs.plugins.android.cache.fix) apply false
+    id("com.android.application") version "8.13.1" apply false
 }

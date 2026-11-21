@@ -1,12 +1,6 @@
 plugins {
-    alias(libs.plugins.android.application)
-    alias(libs.plugins.android.cache.fix)
+    id("com.android.application")
 }
-
-val keystorePath: String? = System.getenv("KEYSTORE_PATH")
-val keystorePass: String? = System.getenv("KEYSTORE_PASS")
-val keyPass: String? = System.getenv("KEYPASS")
-val haveReleaseSigning = !keystorePath.isNullOrEmpty() && file(keystorePath).exists()
 
 android {
     namespace = "io.github.taro902.isolationpolicy"
@@ -15,20 +9,13 @@ android {
     defaultConfig {
         applicationId = "io.github.taro902.isolationpolicy"
         minSdk = 29
-        targetSdk = 34
-        versionCode = 3
-        versionName = "2.0"
+        targetSdk = 36
+        versionCode = 4
+        versionName = "2.1.0"
     }
 
-    signingConfigs {
-        if (haveReleaseSigning) {
-            create("release") {
-                storeFile = file(keystorePath!!)
-                storePassword = keystorePass
-                keyAlias = "isolationpolicy"
-                keyPassword = keyPass
-            }
-        }
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {
@@ -39,14 +26,15 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.findByName("release")
-                ?: signingConfigs.getByName("debug")
+        }
+        debug {
+            isMinifyEnabled = false
         }
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_21
-        targetCompatibility = JavaVersion.VERSION_21
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     lint {
@@ -54,35 +42,32 @@ android {
         abortOnError = false
     }
 
-    buildFeatures {
-        buildConfig = true
-        aidl = true
-    }
-
     packaging {
         resources {
-            merges += "META-INF/xposed/*"
-            merges += "META-INF/NOTICE*"
-            merges += "META-INF/LICENSE*"
-            excludes += "META-INF/*.version"
-            excludes += "META-INF/proguard/*"
-            excludes += "META-INF/*.kotlin_module"
-            excludes += "kotlin/**"
-            excludes += "DebugProbesKt.bin"
+            pickFirsts += listOf(
+                "META-INF/LICENSE",
+                "META-INF/NOTICE",
+                "META-INF/xposed/module.prop",
+                "META-INF/xposed/java_init.list",
+                "META-INF/xposed/scope.list"
+            )
+            excludes += listOf(
+                "META-INF/DEPENDENCIES",
+                "META-INF/*.kotlin_module",
+                "META-INF/androidx.*",
+                "META-INF/LICENSE.txt",
+                "META-INF/NOTICE.txt"
+            )
         }
     }
+}
 
-    dependenciesInfo {
-        includeInApk = false
-        includeInBundle = false
-    }
+tasks.matching { it.name.endsWith("AarMetadata") }.configureEach {
+    enabled = false
 }
 
 dependencies {
-    compileOnly(libs.libxposed.api)
-    implementation(libs.libxposed.service)
-    implementation(libs.androidx.recyclerview)
-}
-tasks.matching { it.name.endsWith("AarMetadata") }.configureEach {
-    enabled = false
+    compileOnly("io.github.libxposed:api:102.0.0")
+    implementation("io.github.libxposed:service:102.0.0")
+    implementation("androidx.recyclerview:recyclerview:1.4.0")
 }

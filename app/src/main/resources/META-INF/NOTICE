@@ -4,11 +4,11 @@ Licensed under the Apache License, Version 2.0.
 
 This product includes software originally developed by:
 MhmRdd (Mohammed Riad) - https://github.com/MhmRdd/Isolation-Policy
-Original Package Namespace: io.github.taro902.isolationpolicy
+Original Package Namespace: io.github.mhmrdd.isolationpolicy
 Copyright 2025-2026 MhmRdd
 
 Summary of Modifications (Apache License 2.0, Section 4(b)):
-1. Refactored package namespace from io.github.taro902.isolationpolicy to
+1. Refactored package namespace from io.github.mhmrdd.isolationpolicy to
    io.github.taro902.isolationpolicy to distinguish this derivative build from upstream.
 2. Migrated Xposed framework integration from legacy API 82 (de.robv.android.xposed)
    to libxposed API 102 (io.github.libxposed:api:102.0.0 and service:102.0.0).

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.IsolPolicy.Pixel" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">#0D0F12</item>
+        <item name="android:statusBarColor">#0D0F12</item>
+        <item name="android:navigationBarColor">#14181F</item>
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
+</resources>
