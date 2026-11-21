@@ -56,25 +56,25 @@ jobs:
           rel=$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)
           dbg=$(find app/build/outputs/apk/debug -name '*.apk' | head -n 1)
           mkdir -p "$RUNNER_TEMP/out"
-          cp "$rel" "$RUNNER_TEMP/out/IsolPolicy-v2.0-release.apk"
-          cp "$dbg" "$RUNNER_TEMP/out/IsolPolicy-v2.0-debug.apk"
+          cp "$rel" "$RUNNER_TEMP/out/IsolPolicy-v2.1.0-release.apk"
+          cp "$dbg" "$RUNNER_TEMP/out/IsolPolicy-v2.1.0-debug.apk"
           {
-            echo "release=$RUNNER_TEMP/out/IsolPolicy-v2.0-release.apk"
-            echo "debug=$RUNNER_TEMP/out/IsolPolicy-v2.0-debug.apk"
+            echo "release=$RUNNER_TEMP/out/IsolPolicy-v2.1.0-release.apk"
+            echo "debug=$RUNNER_TEMP/out/IsolPolicy-v2.1.0-debug.apk"
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: IsolPolicy-v2.0
+          name: IsolPolicy-v2.1.0
           path: ${{ runner.temp }}/out/*.apk
 
       - name: Publish to GitHub Releases
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2.6.2
         with:
-          tag_name: v2.0
-          name: IsolPolicy v2.0
+          tag_name: v2.1.0
+          name: IsolPolicy v2.1.0
           prerelease: false
           files: |
             ${{ steps.stage.outputs.release }}

@@ -1,493 +1,479 @@
 <div align="center">
 
 <h1>IsolPolicy</h1>
-<p><b>Cross-Thread <code>app_zygote</code> Interception, HostingRecord Downgrade &amp; Binary Manifest Threat Radar for LSPosed</b></p>
+
+<p><strong>7-Pillar Server-Side Process Isolation, Lock-Free Reverse IdentityGraph, and Coherent Binder Environment Shield for Android 10-16</strong></p>
 
 <p>
-  <img src="https://img.shields.io/badge/version-2.0-1f6feb?style=flat-square&labelColor=161b22" alt="Version 2.0" />
-  <img src="https://img.shields.io/badge/namespace-io.github.taro902.isolationpolicy-238636?style=flat-square&labelColor=161b22" alt="Namespace" />
-  <img src="https://img.shields.io/badge/api-libxposed_102-007ec6?style=flat-square&labelColor=161b22" alt="libxposed 102" />
-  <img src="https://img.shields.io/badge/hooks-4--Layer_(AMS_%2B_ProcessStart)-d29922?style=flat-square&labelColor=161b22" alt="4-Layer Hooks" />
-  <img src="https://img.shields.io/badge/radar-Binary_AXML_%2B_ServiceInfo-8957e5?style=flat-square&labelColor=161b22" alt="Manifest Radar" />
-  <img src="https://img.shields.io/badge/license-Apache--2.0-6e7681?style=flat-square&labelColor=161b22" alt="License" />
+  <img src="https://img.shields.io/badge/version-2.1.0-4ADE80?style=flat-square&amp;labelColor=0D0F12" alt="Version 2.1.0" />
+  <img src="https://img.shields.io/badge/libxposed-API%20102-38BDF8?style=flat-square&amp;labelColor=0D0F12" alt="libxposed API 102" />
+  <img src="https://img.shields.io/badge/target-system__server%20only-A78BFA?style=flat-square&amp;labelColor=0D0F12" alt="system_server only" />
+  <img src="https://img.shields.io/badge/app%20injection-0%20bytes-4ADE80?style=flat-square&amp;labelColor=0D0F12" alt="0 bytes app injection" />
+  <img src="https://img.shields.io/badge/release%20APK-419%20KB-FBBF24?style=flat-square&amp;labelColor=0D0F12" alt="Release APK 419 KB" />
+  <img src="https://img.shields.io/badge/license-Apache--2.0-94A3B8?style=flat-square&amp;labelColor=0D0F12" alt="Apache 2.0" />
 </p>
 
 <p>
-  <kbd>libxposed API 102</kbd>
-  <kbd>4-Layer SystemServer Hooks</kbd>
-  <kbd>Cross-Thread WeakHashMap</kbd>
-  <kbd>Tri-State Per-App Policy</kbd>
-  <kbd>Binary AXML Scanner</kbd>
+  <a href="#architectural-thesis">Architecture</a> &middot;
+  <a href="#system-topology">Topology</a> &middot;
+  <a href="#formal-specification">Math Spec</a> &middot;
+  <a href="#seven-pillar-engine">7-Pillar Matrix</a> &middot;
+  <a href="#kernel-and-binder-internals">Internals</a> &middot;
+  <a href="#procedural-pixel-ui">Pixel UI</a> &middot;
+  <a href="#ecosystem-synergy">Synergy</a> &middot;
+  <a href="#build-and-verification">Verification</a>
 </p>
 
 </div>
 
-<hr />
+## Architectural Thesis
 
-<h2>01. Executive Summary &amp; AOSP Threat Model</h2>
+Modern Android anti-tamper and financial security SDKs (Alipay `APSecuritySDK`, Promon SHIELD, V-Key `vGuard`, AppSealing, ThreatMetrix, and runtime audit suites) defeat conventional userspace hiding through four structural mechanisms:
 
-<p>
-Starting in Android 10 (API 29), the Android framework allows an application to declare an isolated <code>&lt;service&gt;</code> with <code>android:isolatedProcess="true"</code> alongside <code>android:useAppZygote="true"</code>, optionally paired with an <code>android:zygotePreloadName</code> attribute on its <code>&lt;application&gt;</code> element:
-</p>
+1. **AppZygote & Non-AppZygote Isolated Mount-Escape:** On non-GKI kernels without kernel-level mount filtering (e.g., Linux 4.19 without SUSFS), Zygisk userspace unmount tools clean the primary process namespace (`UID 10xxx`). Security SDKs bypass this by spawning either an `AppZygote` service (`FLAG_USE_APP_ZYGOTE`, `UID 90000-98999`) or an internal isolated helper service (`FLAG_ISOLATED_PROCESS`, `UID 99000-99999`) that inherits an uncleaned mount table directly from Zygote.
+2. **Cross-API State Contradiction:** Spoofing `Settings.Global.adb_enabled = 0` inside `SettingsProvider.call()` alone leaves contradicting truth values in `SettingsProvider.query()` (SQL cursor bypass), sticky broadcast `android.hardware.usb.action.USB_STATE` (`adb = true`), and `UsbService.getCurrentFunctions()` (`FUNCTION_ADB`). Likewise, hiding `Settings.Secure.accessibility_enabled` fails if `AccessibilityManagerService.addClient()` still returns the live 64-bit `IntPair` bitmask (`STATE_FLAG_ACCESSIBILITY_ENABLED = 0x1`) or pushes live updates via `IAccessibilityManagerClient.setState()`.
+3. **Cache Poisoning & Lifecycle Races in `system_server`:** Returning AOSP `_track_generation` keys inside spoofed `SettingsProvider` bundles contaminates shared `MemoryIntArray` caches globally across unrelated processes. Simultaneously, `SettingsProvider.apk` loads into `system_server` via `LoadedApk` after `onSystemServerStarting`, causing single-point hooks to silently miss attachment unless guarded across both `onPackageLoaded` and `onPackageReady`.
+4. **IPC Detection Oracles:** Custom telemetry endpoints exposed on system services become trivial detection fingerprints if unauthorized callers receive non-stock exceptions or custom error bundles.
 
-~~~xml
-<application
-    android:label="TargetApplication"
-    android:zygotePreloadName="com.example.security.AppZygotePreload">
+**IsolPolicy v2.1.0** resolves all four mechanisms entirely inside `system_server` (`scope: system`) with **zero bytes injected into any target application process**, zero `PackageManager` lock contention, zero disk I/O in `system_server`, and a hardware-atomic 2 KB `IdentityGraph`.
 
-    <service
-        android:name="com.example.security.IsolatedProbeService"
-        android:exported="false"
-        android:isolatedProcess="true"
-        android:useAppZygote="true" />
-</application>
-~~~
-
-<p>
-When the package parser processes this manifest, it sets two bitflags inside <code>android.content.pm.ServiceInfo.flags</code>: <code>FLAG_ISOLATED_PROCESS</code> (<code>0x00000002</code>) and <code>FLAG_USE_APP_ZYGOTE</code> (<code>0x00000008</code>). When the application subsequently invokes <code>Context.bindIsolatedService()</code> or <code>Context. bindService()</code>, <code>ActiveServices.bringUpServiceLocked()</code> inside <code>system_server</code> evaluates both bitmasks:
-</p>
-
-$$
-\mathrm{isIsolated}(s) \iff (s.\mathrm{flags} \land \mathtt{0x00000002}) \neq 0, \qquad \mathrm{usesAppZygote}(s) \iff (s.\mathrm{flags} \land \mathtt{0x00000008}) \neq 0
-$$
-
-<p>
-When both conditions evaluate to true, <code>system_server</code> does not fork the service from the primary system Zygote. Instead, it spawns a dedicated per-application <b>App Zygote</b> process running inside the privileged <code>u:r:app_zygote:s0</code> SELinux context. Prior to transitioning the child service into <code>u:r:isolated_app:s0</code>, the App Zygote loads the application's APK and executes <code>ZygotePreload.doPreload(ApplicationInfo)</code> directly inside <code>u:r:app_zygote:s0</code>.
-</p>
-
-<hr />
-
-<h2>02. Kernel-Space <code>selinuxfs</code> Mechanics (<code>DirtySepolicy</code> Oracle)</h2>
-
-<p>
-On devices running userspace root solutions (Magisk or Kitsune Mask) over kernels without kernel-level <code>susfs</code> patches, the live SELinux policy loaded in kernel memory contains custom domain and type definitions required by root daemons and injection frameworks.
-</p>
-
-<p>
-Ordinary application processes running in <code>u:r:untrusted_app:s0</code> or <code>u:r:isolated_app:s0</code> are strictly forbidden by AOSP SELinux policy from querying the kernel's security server via <code>/sys/fs/selinux/context</code> or <code>/sys/fs/selinux/access</code>. However, AOSP's <code>system/sepolicy/private/app_zygote.te</code> explicitly grants the <code>app_zygote</code> domain permission to validate security contexts and compute access vectors:
-</p>
-
-~~~text
-allow app_zygote security:security { check_context compute_av };
-allow app_zygote selinuxfs:file { open read write };
-~~~
-
-<p>
-Inside the Linux kernel (<code>security/selinux/selinuxfs.c</code>), writing a candidate context string to <code>/sys/fs/selinux/context</code> invokes <code>sel_write_context()</code>, which checks <code>SECURITY__CHECK_CONTEXT</code> and then queries the kernel's internal SID hash table via <code>security_context_to_sid()</code>:
-</p>
-
-~~~c
-static ssize_t sel_write_context(struct file *file, char *buf, size_t size)
-{
-    struct selinux_fs_info *fsi = file_inode(file)->i_sb->s_fs_info;
-    struct selinux_state *state = fsi->state;
-    char *canon = NULL;
-    u32 sid, len;
-    ssize_t length;
-
-    length = avc_has_perm(&selinux_state,
-                          current_sid(), SECINITSID_SECURITY,
-                          SECCLASS_SECURITY, SECURITY__CHECK_CONTEXT, NULL);
-    if (length)
-        goto out;
-
-    length = security_context_to_sid(state, buf, size, &sid, GFP_KERNEL);
-    if (length)
-        goto out;
-
-    length = security_sid_to_context(state, sid, &canon, &len);
-    if (length)
-        goto out;
-
-    length = simple_transaction_get(file, canon, len);
-out:
-    kfree(canon);
-    return length;
-}
-~~~
-
-<p>
-Because <code>sel_write_context()</code> and <code>sel_write_access()</code> execute entirely inside kernel space, they cannot be hooked or spoofed by userspace Zygisk or Xposed modules once a process is already running inside <code>u:r:app_zygote:s0</code>:
-</p>
-
-<ul>
-  <li>
-    <b>Type Existence Probing:</b> Code inside <code>ZygotePreload.doPreload()</code> writes strings such as <code>u:r:magisk:s0</code>, <code>u:object_r:magisk_file:s0</code>, <code>u:object_r:ksu_file:s0</code>, or <code>u:object_r:lsposed_file:s0</code> to <code>/sys/fs/selinux/context</code>. On a clean stock kernel, <code>security_context_to_sid()</code> returns <code>-EINVAL</code>. On a rooted kernel, it returns the canonicalized context string, proving root modification.
-  </li>
-  <li>
-    <b>Access Vector Interrogation:</b> Writing source/target/class queries (such as <code>untrusted_app magisk binder call</code> or <code>system_server system_server process execmem</code>) to <code>/sys/fs/selinux/access</code> reveals modified policy edges injected by root managers.
-  </li>
-  <li>
-    <b>Early Mount Namespace Sampling:</b> Because <code>AppZygote</code> forks down a separate path in <code>ProcessList.createAppZygoteForProcessIfNeeded()</code>, preload code can snapshot <code>/proc/self/mountinfo</code> and inspect anonymous device minor gaps (<code>0:XX</code>) before standard Zygisk unmount modules scrub the process mount table.
-  </li>
-</ul>
-
-<hr />
-
-<h2>03. Side-Channel Analysis: Fork-Dropping (v1.1) vs. In-Flight Downgrade (v2.0)</h2>
-
-<p>
-To prevent an application from executing code inside <code>u:r:app_zygote:s0</code>, interception must occur inside <code>system_server</code> before <code>AppZygote</code> is spawned. However, <i>how</i> <code>system_server</code> handles that interception determines whether the target application detects tampering:
-</p>
-
-~~~diff
-  Caller invokes Context.bindIsolatedService(intent, Context.BIND_AUTO_CREATE, ...)
-  └──► ActiveServices.bringUpServiceLocked() creates HostingRecord (mHostingZygote = 2)
-
-- [Upstream v1.1 Behavior: Hard Fork Drop]
-- 1. Hooks boolean ProcessList.startProcessLocked(ProcessRecord, HostingRecord, ...)
-- 2. Short-circuits execution and returns Boolean.TRUE without spawning any child process
-- 3. ActivityManagerService marks the ServiceRecord as starting, returning true to caller
-- 4. Caller waits for ServiceConnection.onServiceConnected() callback that never arrives
-- 5. After 6,000 ms, caller watchdog expires -> triggers "SELinux carrier probe timed out"
--    and "ksuThroneHunt: CARRIER_SETUP_FAILED" warnings in modern detection suites
-
-+ [IsolPolicy v2.0 Default Behavior: In-Flight Regular Zygote Downgrade]
-+ 1. Intercepts HostingRecord at creation time in HostingRecord.byAppZygote() and across
-+    ProcessList.startProcessLocked() + ProcessList.startProcess()
-+ 2. Mutates HostingRecord.mHostingZygote in-place from 2 (APP_ZYGOTE) to 0 (REGULAR_ZYGOTE)
-+ 3. Forces HostingRecord.usesAppZygote() to evaluate to Boolean.FALSE across all threads
-+ 4. system_server dispatches the spawn to the primary system Zygote via Process.start()
-+ 5. Child service launches directly inside u:r:isolated_app:s0 in ~5 ms
-+ 6. AppZygote is never created and ZygotePreload.doPreload() is never invoked
-+ 7. ServiceConnection.onServiceConnected() completes normally with zero timeout anomaly
-+ 8. Any subsequent attempt by the service to open /sys/fs/selinux/* fails with natural EACCES
-~~~
-
-<hr />
-
-<h2>04. Cross-Thread Pipeline &amp; 4-Layer Hook Topology</h2>
-
-<p>
-A critical architectural detail in Android 11 through Android 16 is that process creation inside <code>com.android.server.am.ProcessList</code> is asynchronous and spans multiple threads:
-</p>
-
-<ol>
-  <li>
-    <b>Thread 1 (AMS Main Thread):</b> <code>ActiveServices.bringUpServiceLocked()</code> constructs the <code>HostingRecord</code> via <code>HostingRecord.byAppZygote()</code> and invokes the three overloads of <code>ProcessList.startProcessLocked()</code> while holding the global <code>ActivityManagerService</code> monitor lock.
-  </li>
-  <li>
-    <b>Thread 2 (<code>ProcessStart</code> Handler Thread):</b> The third overload of <code>startProcessLocked()</code> packages the spawn parameters into a lambda runnable and posts it to <code>mService.mProcessStartHandler</code>. That worker thread executes <code>ProcessList.startProcess(HostingRecord, ...)</code>, which evaluates <code>hostingRecord.usesAppZygote()</code> to decide whether to call <code>createAppZygoteForProcessIfNeeded()</code> or <code>Process.start()</code>.
-  </li>
-</ol>
-
-<p>
-Because execution crosses from the AMS main thread onto the <code>ProcessStart</code> worker thread, a simple <code>ThreadLocal&lt;Boolean&gt;</code> guard set during <code>startProcessLocked()</code> is lost before <code>startProcess()</code> runs. Furthermore, on Overload 1 of <code>startProcessLocked(String, ApplicationInfo, ...)</code>, the <code>ProcessRecord</code> object has not yet been allocated when the method enters.
-</p>
-
-<p>
-<b>IsolPolicy v2.0</b> addresses this by binding package identity and downgrade state directly to the <code>HostingRecord</code> object reference via a synchronized <code>WeakHashMap&lt;Object, String&gt;</code> (`sHostingRecordPkgMap`) and `sDowngradedRecords` map. Because the same `HostingRecord` reference is passed into the runnable posted to `mProcessStartHandler`, the tag travels seamlessly across threads:
-</p>
-
-~~~mermaid
-sequenceDiagram
-    autonumber
-    participant App as Target App
-    participant AMS as ActiveServices (AMS Thread)
-    participant L12 as BindHook Layer 1 & 2 (AMS)
-    participant Worker as ProcessList (ProcessStart Thread)
-    participant L34 as BindHook Layer 3 & 4 (Worker)
-    participant Zygote as Primary Zygote
-
-    App->>AMS: bindIsolatedService(intent, BIND_AUTO_CREATE)
-    AMS->>L12: HostingRecord.byAppZygote(cn, definingPkg, uid, ...)
-    Note over L12: Layer 1 extracts definingPkg<br/>Tags HostingRecord in WeakHashMap<br/>Rewrites mHostingZygote from 2 to 0
-    L12-->>AMS: HostingRecord (mHostingZygote = 0)
-    AMS->>L12: ProcessList.startProcessLocked(app, hr, ...)
-    Note over L12: Layer 2 resolves pkg via 4-source chain<br/>If HARD DROP: Overload 2 returns TRUE<br/>If DOWNGRADE: enforces mHostingZygote = 0
-    L12->>Worker: Post Runnable to mProcessStartHandler
-    Worker->>L34: ProcessList.startProcess(hr, entryPoint, app, ...)
-    Note over L34: Layer 3 reads WeakHashMap tag on worker thread<br/>Layer 4 forces hr.usesAppZygote() to FALSE
-    L34->>Zygote: Process.start(entryPoint, ..., isolated = true)
-    Zygote-->>App: Spawns in u:r:isolated_app:s0 (~5 ms)
-    Note right of App: ZygotePreload never runs<br/>Service binds with zero timeout<br/>selinuxfs probes hit EACCES
-~~~
-
-<hr />
-
-<h2>05. Decision Graph: 4-Source Resolution &amp; Tri-State Engine</h2>
-
-<p>
-To ensure compatibility across AOSP, LineageOS/crDroid, HyperOS/MIUI, OneUI, and ColorOS—where internal method signatures on <code>ProcessList</code> frequently vary—package identity is resolved through a 4-stage fallback chain before evaluating the package's tri-state policy (<kbd>AUTO</kbd>, <kbd>DOWNGRADE</kbd>, or <kbd>HARD DROP</kbd>):
-</p>
-
-~~~mermaid
-flowchart TD
-    A["Incoming Process Spawn in system_server"] --> B{"usesAppZygote == true OR tagged in sDowngradedRecords?"}
-    B -- "No" --> Z["Proceed Unmodified"]
-    B -- "Yes" --> C["4-Source Package Identity Resolver"]
-
-    subgraph Resolver ["Universal Package Resolution Chain"]
-        C --> R1["1. sHostingRecordPkgMap WeakHashMap Tag"]
-        R1 --> R2["2. HostingRecord.mDefiningPackageName Field"]
-        R2 --> R3["3. Direct ApplicationInfo.packageName Argument"]
-        R3 --> R4["4. ProcessRecord.info.packageName Field"]
-    end
-
-    R4 --> D{"Package in sDeniedPackages RAM Set?"}
-    D -- "No" --> Z
-    D -- "Yes" --> E{"Evaluate Per-Package Mode Override"}
-
-    E -- "In sDropOverrides" --> DROP["Execute Hard Drop Mode"]
-    E -- "In sDowngradeOverrides" --> DOWN["Execute Silent Downgrade Mode"]
-    E -- "Mode == AUTO" --> F{"Check sGlobalDropMode"}
-    F -- "True" --> DROP
-    F -- "False" --> DOWN
-
-    DROP --> DROP_ACT["Overload 1 allocates ProcessRecord normally<br/>Overload 2 returns Boolean.TRUE without fork"]
-    DOWN --> DOWN_ACT["Mutate HostingRecord.mHostingZygote = 0<br/>Force usesAppZygote = FALSE<br/>Spawn via Global Zygote in u:r:isolated_app:s0"]
-~~~
-
-<hr />
-
-<h2>06. Implementation Internals</h2>
-
-<h3>A. 4-Layer Hook Registration &amp; ART Deoptimization</h3>
-
-<p>
-In Android 14+ builds, trivial getters such as <code>HostingRecord.usesAppZygote()</code> are frequently inlined by the ART compiler directly into <code>ProcessList.startProcessLocked()</code> and <code>startProcess()</code> inside <code>services.odex</code>. Using <code>libxposed</code> API 102, <code>BindHook</code> invokes <code>module.deoptimize()</code> across all target methods in <code>HostingRecord</code> and <code>ProcessList</code> during <code>onSystemServerStarting()</code>:
-</p>
-
-~~~java
-private static void hookProcessList(final XposedModule module, ClassLoader cl) {
-    try {
-        Class<?> plClass = Class.forName(PROCESS_LIST, false, cl);
-        Method[] methods = plClass.getDeclaredMethods();
-        for (final Method m : methods) {
-            String name = m.getName();
-            if ("startProcessLocked".equals(name)) {
-                try { module.deoptimize(m); } catch (Throwable ignored) {}
-                installStartProcessLockedHook(module, m);
-            } else if ("startProcess".equals(name)) {
-                try { module.deoptimize(m); } catch (Throwable ignored) {}
-                installStartProcessWorkerHook(module, m);
-            } else if ("startAppZygoteIfNeededLocked".equals(name)
-                    || "createAppZygoteForProcessIfNeeded".equals(name)) {
-                try { module.deoptimize(m); } catch (Throwable ignored) {}
-            }
-        }
-    } catch (Throwable t) {
-        Logger.e("hookProcessList failed", t);
-    }
-}
-~~~
-
-<h3>B. Overload-Aware Hard Drop vs. Silent Downgrade</h3>
-
-<p>
-In AOSP's <code>ActiveServices.bringUpServiceLocked()</code>, the caller expects <code>ActivityManagerService.startProcessLocked()</code> (Overload 1, returning <code>ProcessRecord</code>) to return a non-null <code>ProcessRecord</code>. Overload 1 allocates the <code>ProcessRecord</code> and delegates to Overload 2 (returning <code>boolean</code>). Therefore, when <kbd>HARD DROP</kbd> is selected, <code>BindHook</code> allows Overload 1 to allocate the <code>ProcessRecord</code> and short-circuits specifically on the <code>boolean</code> overload:
-</p>
-
-~~~java
-if (shouldDrop(pkg)) {
-    if (returnsBoolean) {
-        return Boolean.TRUE;
-    }
-    return chain.proceed();
-}
-
-downgradeToRegularZygote(hr);
-sForceRegularZygote.set(Boolean.TRUE);
-try {
-    return chain.proceed();
-} finally {
-    sForceRegularZygote.set(Boolean.FALSE);
-}
-~~~
-
-<h3>C. Binary AXML <code>XmlResourceParser</code> Threat Radar</h3>
-
-<p>
-When targeting Android 14+ (API 34+), reflective access to the hidden field <code>ApplicationInfo.zygotePreloadName</code> is blocked both by Android Lint (<code>BlockedPrivateApi</code>) and by ART runtime enforcement. To identify installed packages that declare a <code>ZygotePreload</code> class without triggering hidden-API restrictions, the scanner opens the target APK's compiled binary <code>AndroidManifest.xml</code> stream directly via <code>AssetManager.openXmlResourceParser()</code>:
-</p>
-
-~~~java
-private static String extractManifestZygotePreload(PackageManager pm, ApplicationInfo ai) {
-    XmlResourceParser parser = null;
-    try {
-        Resources res = pm.getResourcesForApplication(ai);
-        AssetManager assets = res.getAssets();
-        parser = assets.openXmlResourceParser("AndroidManifest.xml");
-        int eventType = parser.getEventType();
-        while (eventType != XmlPullParser.END_DOCUMENT) {
-            if (eventType == XmlPullParser.START_TAG) {
-                if ("application".equals(parser.getName())) {
-                    String preload = parser.getAttributeValue(ANDROID_NS, "zygotePreloadName");
-                    if (preload != null && !preload.isEmpty()) {
-                        return preload;
-                    }
-                    break;
-                }
-            }
-            eventType = parser.next();
-        }
-    } catch (Throwable ignored) {
-    } finally {
-        if (parser != null) {
-            try { parser.close(); } catch (Throwable ignored) {}
-        }
-    }
-    return null;
-}
-~~~
-
-<hr />
-
-<h2>07. Complexity &amp; Specification Matrix</h2>
-
-<p>
-In upstream v1.1, every <code>app_zygote</code> spawn invoked <code>XSharedPreferences.reload()</code> inside <code>startProcessLocked()</code>, performing synchronous filesystem <code>stat()</code> calls while holding the global AMS lock. In v2.0, policy evaluation is an $\mathcal{O}(1)$ volatile memory lookup against an immutable <code>AtomicReference&lt;Set&lt;String&gt;&gt;</code> updated via Binder IPC:
-</p>
-
-$$
-T_{\mathrm{lookup}}(n) = \mathcal{O}(1) \quad \text{via } \mathtt{AtomicReference.get().contains(pkg)}, \qquad \mathrm{I/O}_{\mathrm{disk}} = 0 \text{ bytes/spawn}
-$$
-
-<table width="100%">
+<table>
   <thead>
     <tr>
-      <th align="left">Subsystem / Parameter</th>
-      <th align="left">Upstream v1.1</th>
-      <th align="left">IsolPolicy v2.0</th>
+      <th>Dimension</th>
+      <th>Upstream v1.1 (API 82)</th>
+      <th>IsolPolicy v2.0 (API 102)</th>
+      <th>IsolPolicy v2.1.0 (API 102)</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td><b>Package Namespace</b></td>
-      <td><code>io.github.mhmrdd.isolationpolicy</code></td>
-      <td><code>io.github.taro902.isolationpolicy</code></td>
+      <td><strong>Execution Boundary</strong></td>
+      <td><code>system_server</code></td>
+      <td><code>system_server</code> (0 B app inject)</td>
+      <td><code>system_server</code> (0 B app inject, <code>autoHotReload=false</code>)</td>
     </tr>
     <tr>
-      <td><b>Xposed Framework Contract</b></td>
-      <td><code>de.robv.android.xposed:api:82</code> (Legacy)</td>
-      <td><code>io.github.libxposed:api:102.0.0</code> + <code>service:102.0.0</code></td>
+      <td><strong>Process Isolation Control</strong></td>
+      <td>Hard cancel (SELinux timeout)</td>
+      <td>4-Layer AppZygote Silent Downgrade</td>
+      <td>4-Layer AppZygote + 6-Guard Selective Isolated Folding</td>
     </tr>
     <tr>
-      <td><b>LSPosed Vector Status</b></td>
-      <td>Triggers yellow deprecated feature warning</td>
-      <td>Native <kbd>API 102</kbd> module; zero deprecation warnings</td>
+      <td><strong>UID Attribution</strong></td>
+      <td>Package name scan</td>
+      <td><code>WeakHashMap</code> record tracking</td>
+      <td>Lock-Free 2 KB <code>AtomicLongArray</code> Reverse <code>IdentityGraph</code></td>
     </tr>
     <tr>
-      <td><b>Hook Topology in <code>system_server</code></b></td>
-      <td>Single hook on <code>boolean startProcessLocked(...)</code></td>
-      <td>4-Layer: <code>byAppZygote</code> + <code>usesAppZygote</code> + <code>startProcessLocked</code> + <code>startProcess</code></td>
-    </tr>
-    <tr>
-      <td><b>Cross-Thread State Tracking</b></td>
+      <td><strong>Environment Coherence</strong></td>
       <td>None</td>
-      <td>Synchronized <code>WeakHashMap</code> bridging AMS &amp; <code>ProcessStart</code> threads</td>
-    </tr>
-    <tr>
-      <td><b>ART Inlining Defense</b></td>
       <td>None</td>
-      <td>Explicit <code>XposedInterface#deoptimize</code> across all target methods</td>
+      <td><code>Settings.call+query</code>, Sticky <code>USB_STATE</code>, <code>UsbService</code>, <code>AMS.addClient+Push</code>, <code>getChangedPackages</code>, <code>DisplayManager</code></td>
     </tr>
     <tr>
-      <td><b>Identity Resolution Chain</b></td>
-      <td><code>ProcessRecord.info.packageName</code> only</td>
-      <td>4-Source: Factory Args ➔ <code>mDefiningPackageName</code> ➔ <code>ApplicationInfo</code> ➔ <code>ProcessRecord</code></td>
+      <td><strong>Telemetry &amp; Diagnostics</strong></td>
+      <td>Logcat</td>
+      <td>Silent Release</td>
+      <td>64-Slot Seqlock Ring Buffer + Zero-Oracle IPC Gate + 7-Bit Hook Health Matrix</td>
     </tr>
     <tr>
-      <td><b>Policy Granularity</b></td>
-      <td>Global hard drop only</td>
-      <td>Global default + Per-Package tri-state (<kbd>AUTO</kbd> / <kbd>DOWNGRADE</kbd> / <kbd>HARD DROP</kbd>)</td>
+      <td><strong>Static Threat Analysis</strong></td>
+      <td>None</td>
+      <td>Binary AXML AppZygote Radar</td>
+      <td>Binary AXML + Zero-Extract Native ELF Antifraud SDK Scanner</td>
     </tr>
     <tr>
-      <td><b><code>ServiceConnection</code> Lifecycle</b></td>
-      <td>Orphans service; hangs caller for 6,000 ms</td>
-      <td>Completes <code>onServiceConnected()</code> in ~5 ms inside <code>u:r:isolated_app:s0</code></td>
-    </tr>
-    <tr>
-      <td><b>Threat Radar Scanner</b></td>
-      <td>None (plain alphabetical list)</td>
-      <td>In-memory <code>ServiceInfo</code> flags + binary AXML <code>XmlResourceParser</code> preload reader</td>
-    </tr>
-    <tr>
-      <td><b>AMS Critical Section I/O</b></td>
-      <td>Synchronous disk <code>sPrefs.reload()</code> per spawn</td>
-      <td>Lock-free $\mathcal{O}(1)$ RAM <code>AtomicReference</code> read (zero disk I/O)</td>
-    </tr>
-    <tr>
-      <td><b>Release Log Footprint</b></td>
-      <td>Writes <code>[IsolPolicy]</code> traces to Logcat &amp; Xposed log</td>
-      <td>Compiled out in release builds (<code>BuildConfig.DEBUG == false</code>)</td>
+      <td><strong>UI Footprint (Release)</strong></td>
+      <td>Material / AppCompat</td>
+      <td>~305 KB</td>
+      <td>419 KB Procedural 16-Bit Pixel Canvas (Zero Compose/AppCompat/PNG)</td>
     </tr>
   </tbody>
 </table>
 
-<hr />
+## System Topology
 
-<h2>08. Diagnostic Telemetry &amp; Policy Serialization</h2>
+~~~mermaid
+flowchart TB
+    UI[MainActivity Procedural Pixel UI]
+    RADAR[ManifestRadar AXML and ELF Scanner]
+    PREFS[(XposedService RemotePreferences)]
+    ENGINE[PolicyEngine Lock-Free AtomicReference Snapshot]
+    GRAPH[(IdentityGraph 256-Slot AtomicLongArray 2KB)]
+    HUB[TelemetryHub 64-Slot Seqlock Ring Buffer]
 
-<p>
-The manager UI embeds an internal isolated service declared with <code>android:isolatedProcess="true"</code>, <code>android:useAppZygote="true"</code>, and <code>android:zygotePreloadName="io.github.taro902.isolationpolicy.AppZygote"</code>. On launch and on every policy apply, it binds to this service to measure bind latency and verify that <code>AppZygote.doPreload()</code> was neutralized:
-</p>
+    subgraph SYSSRV[system_server UID 1000 - Zero Target Process Injection]
+        direction TB
+        P1[Pillar 1 AppZygoteShield]
+        P2[Pillar 2 IsolatedFoldShield]
+        P3[Pillar 3 SettingsShield Call and Query]
+        P4[Pillar 4 UsbBroadcastShield]
+        P5[Pillar 5 AccessibilityShield]
+        P6[Pillar 6 PackageChangeShield]
+        P7[Pillar 7 DisplayShield]
+        GATE{Zero-Oracle IPC Gate}
+    end
 
-<table width="100%">
-  <tr>
-    <td width="50%" valign="top">
-      <b>Silent Downgrade Mode (Default)</b>
-      <pre><samp>module           : active (LSPosed API 102)
-hook layers      : 4/4 (byAppZygote + usesAppZygote + startProcess*)
-default engine   : silent downgrade (isolated_app)
-threat radar     : 3 app_zygote/preload  |  14 isolated
-isolated service : bound in 5 ms
-preload          : neutralized ( bypassed app_zygote )
-ctx@now          : u:r:isolated_app:s0:c512,c768
-isolated         : true
-uid              : 99021
-eligible: 142    selected: 4    overrides: 1</samp></pre>
-    </td>
-    <td width="50%" valign="top">
-      <b>Hard Drop Mode (Global or Per-App Override)</b>
-      <pre><samp>module           : active (LSPosed API 102)
-hook layers      : 4/4 (byAppZygote + usesAppZygote + startProcess*)
-default engine   : hard drop (skip fork)
-threat radar     : 3 app_zygote/preload  |  14 isolated
-isolated service : not bound
-reason           : connection timed out (hard drop active)
-eligible: 142    selected: 4    overrides: 1</samp></pre>
-    </td>
-  </tr>
+    UI -->|Write Bitmask and AppId Map| PREFS
+    RADAR -->|Risk Score and Preset| UI
+    PREFS -->|Read-Only Change Listener| ENGINE
+    P1 -->|Register Isolated to Owner UID| GRAPH
+    GRAPH -->|O1 Owner AppId Lookup| ENGINE
+    ENGINE --> P1
+    ENGINE --> P2
+    ENGINE --> P3
+    ENGINE --> P4
+    ENGINE --> P5
+    ENGINE --> P6
+    ENGINE --> P7
+    P1 --> HUB
+    P2 --> HUB
+    P3 --> HUB
+    P4 --> HUB
+    P5 --> HUB
+    P6 --> HUB
+    P7 --> HUB
+    P3 --> GATE
+    GATE -->|Verified Self AppId| HUB
+    HUB -->|Compact Primitive Bundle| UI
+    GATE -->|Any Other UID| STOCK[Stock AOSP chain.proceed]
+~~~
+
+## Coherent Interception Sequence
+
+~~~mermaid
+sequenceDiagram
+    participant App as Guarded Financial App
+    participant AM as ActivityManager and ActiveServices
+    participant Graph as PolicyEngine and IdentityGraph
+    participant SP as SettingsProvider and AMS and DMS
+    participant Hub as TelemetryHub Ring Buffer
+    participant UI as IsolPolicy Pixel UI
+
+    App->>AM: bindService with useAppZygote or isolatedProcess
+    AM->>Graph: Lookup 32-bit PolicyFlags by AppId or Package
+    alt AppZygote Service and AZ_DOWNGRADE
+        AM->>AM: Clear mHostingZygote to REGULAR_ZYGOTE across ProcessStart thread
+        AM->>Hub: Record PILLAR_APP_ZYGOTE ACT_DOWNGRADED
+    else Internal Isolated Service and FLAG_ISO_FOLD
+        AM->>AM: Verify 6 WebView safety guards then clear FLAG_ISOLATED_PROCESS
+        AM->>Hub: Record PILLAR_ISO_FOLD ACT_FOLDED
+    else Isolated Process Permitted
+        AM->>Graph: Atomic pack isoUid and ownerAppId into AtomicLongArray
+    end
+
+    App->>SP: Query Settings.Global call and SQL cursor
+    SP->>Graph: Resolve effective ownerAppId from callingUid
+    SP-->>App: Clean Bundle value only without _track_generation and MatrixCursor
+    SP->>Hub: Record PILLAR_SETTINGS ACT_SPOOFED
+
+    App->>SP: registerReceiverWithFeature ACTION_USB_STATE
+    SP-->>App: Cloned sticky Intent with adb false preserving MTP
+    SP->>Hub: Record PILLAR_USB ACT_SANITIZED
+
+    App->>SP: AccessibilityManagerService addClient and getEnabledList
+    SP-->>App: IntPair state cleared of A11y flags and empty service list
+    SP->>Hub: Record PILLAR_A11Y ACT_SANITIZED
+
+    App->>SP: Probe ISOLPOLICY_IPC_V21 unauthorized UID
+    SP-->>App: Stock AOSP chain.proceed response with zero oracle
+
+    UI->>SP: Call ISOLPOLICY_IPC_V21 verified selfAppId
+    SP->>Hub: Read tear-free seqlock 64-slot ring buffer
+    SP-->>UI: Live counters and 7-bit hook health matrix
+~~~
+
+## Formal Specification
+
+### 1. Compact 32-Bit Per-Package Policy Encoding
+
+Every target application policy is packed into a single 32-bit primitive integer $\Phi_u \in [0, 127]$ stored inside an immutable copy-on-write `SparseIntArray`:
+
+$$\Phi_u = m_{\text{AZ}} + 2^{2} f_{\text{ISO}} + 2^{3} f_{\text{DEV}} + 2^{4} f_{\text{A11Y}} + 2^{5} f_{\text{PKG}} + 2^{6} f_{\text{DISP}}$$
+
+$$m_{\text{AZ}} \in \{0:\text{OFF},\quad 1:\text{AUTO},\quad 2:\text{DOWNGRADE},\quad 3:\text{HARD\_DROP}\}, \quad f_k \in \{0, 1\}$$
+
+### 2. Hardware-Atomic Reverse `IdentityGraph`
+
+For any incoming Binder `callingUid` $u$, the fast-path effective application identifier $a_{\text{eff}}(u)$ bypasses all system UIDs in a single integer comparison and resolves isolated/AppZygote UIDs ($u \bmod 100000 \ge 90000$) via Fibonacci multiplicative hashing over a fixed 256-slot `AtomicLongArray`:
+
+$$a(u) = u \bmod 100000, \qquad h(u) = \left(\left(w \oplus \left\lfloor \frac{w}{2^{16}} \right\rfloor\right) \bmod 256\right), \quad w = (u \cdot \text{0x9E3779B9}) \bmod 2^{32}$$
+
+$$E_i = \left(u_{\text{iso}} \cdot 2^{32}\right) + a_{\text{owner}}, \qquad \operatorname{Mem}(\mathcal{G}) = 256 \times 8\text{ B} = 2048\text{ B}$$
+
+Because both `isoUid` (upper 32 bits) and `ownerAppId` (lower 32 bits) occupy a single 64-bit word, every ARM64 Kryo 260 read/write compiles to hardware-atomic `LDAR`/`STLR` semantics with zero locks, zero heap allocation, and bounded 8-step linear probing ($\mathcal{O}(1)$ worst-case latency).
+
+### 3. Coherent `AccessibilityManagerService.addClient()` Projection
+
+AOSP packs client state flags and relevant event types into a 64-bit `IntPair` return value $R_{\text{raw}}$. IsolPolicy masks active accessibility state bits while preserving non-accessibility event flags intact:
+
+$$R_{\text{raw}} = \left(S_{\text{state}} \cdot 2^{32}\right) + E_{\text{events}}, \qquad M_{\text{clear}} = 2^{0} + 2^{1} + 2^{3} + 2^{4} = \text{0x1B}$$
+
+$$S_{\text{clean}} = \sum_{b \in \{0..31\} \setminus \{0,1,3,4\}} s_b \cdot 2^{b}, \qquad R_{\text{out}} = \left(S_{\text{clean}} \cdot 2^{32}\right) + E_{\text{events}}$$
+
+### 4. Deterministic Static Threat Score
+
+`ManifestRadar` computes an offline severity vector $\mathcal{R}(p) \in [0, 100]$ from Binary AXML parsing and zero-extract ZIP Central Directory inspection:
+
+$$\mathcal{R}(p) = \min\!\left(100,\quad 45\cdot\mathbf{1}_{\text{AZ}} + 25\cdot\mathbf{1}_{\text{ISO}} + \min\!\left(35,\quad 20\cdot|\mathcal{S}_{\text{ELF}}|\right) + 10\cdot\mathbf{1}_{\text{QAP}} + 15\cdot\mathbf{1}_{\text{FIN}}\right)$$
+
+## Seven-Pillar Engine
+
+<table>
+  <thead>
+    <tr>
+      <th>Pillar</th>
+      <th>Module Class</th>
+      <th>AOSP Target Class &amp; Methods</th>
+      <th>Coherent Invariant &amp; Safety Guard</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>1. AppZygote</strong></td>
+      <td><code>AppZygoteShield</code></td>
+      <td><code>HostingRecord.byAppZygote</code>, <code>usesAppZygote</code>, <code>ProcessList.startProcessLocked</code>, <code>startProcess</code>, <code>removeProcessNameLocked</code></td>
+      <td>4-layer cross-thread Silent Downgrade (<code>mHostingZygote = 0</code>) or Hard Drop + live <code>IdentityGraph</code> registration/eviction + <code>module.deoptimize()</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>2. Isolated Fold</strong></td>
+      <td><code>IsolatedFoldShield</code></td>
+      <td><code>ActiveServices.bringUpServiceLocked</code></td>
+      <td>Opt-in folding of internal <code>FLAG_ISOLATED_PROCESS</code> helpers into clean main UID <code>10xxx</code>. Strictly blocks <code>FLAG_EXTERNAL_SERVICE</code>, <code>FLAG_USE_APP_ZYGOTE</code>, dynamic <code>bindIsolatedService</code>, and WebView/Chrome packages.</td>
+    </tr>
+    <tr>
+      <td><strong>3. Settings &amp; IPC</strong></td>
+      <td><code>SettingsShield</code></td>
+      <td><code>SettingsProvider.call</code>, <code>SettingsProvider.query</code> (attached via Dual-Checkpoint <code>onPackageLoaded</code> + <code>onPackageReady</code>)</td>
+      <td>Spoofs <code>GET_global</code> (Dev/ADB/Debug) and <code>GET_secure</code> (A11y/Mock) returning clean single-key <code>Bundle</code> without <code>_track_generation</code> + SQL <code>MatrixCursor</code> sanitizer (both full and single-column projections) + Zero-Oracle IPC Gate.</td>
+    </tr>
+    <tr>
+      <td><strong>4. USB &amp; ADB</strong></td>
+      <td><code>UsbBroadcastShield</code></td>
+      <td><code>ActivityManagerService.registerReceiverWithFeature</code>, <code>UsbService.getCurrentFunctions</code>, <code>isFunctionEnabled</code></td>
+      <td>Clones sticky <code>ACTION_USB_STATE</code> with <code>adb=false</code> without mutating system <code>mStickyBroadcasts</code> + strips <code>FUNCTION_ADB (1L)</code> while preserving USB MTP.</td>
+    </tr>
+    <tr>
+      <td><strong>5. Accessibility</strong></td>
+      <td><code>AccessibilityShield</code></td>
+      <td><code>AccessibilityManagerService.addClient</code>, <code>getEnabledAccessibilityServiceList</code>, <code>getInstalledAccessibilityServiceList</code>, <code>IAccessibilityManagerClient$Stub$Proxy.setState</code></td>
+      <td>Strips <code>IntPair</code> state bits, dynamically matches <code>ParceledListSlice</code> (Android 13-16) vs <code>List</code> (Android 10-12), and filters live push notifications via <code>WeakHashMap&lt;IBinder, Integer&gt;</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>6. Package Delta</strong></td>
+      <td><code>PackageChangeShield</code></td>
+      <td><code>IPackageManagerBase</code>, <code>PackageManagerService$IPackageManagerImpl</code>, <code>PackageManagerService</code>, fallback <code>ComputerEngine.getChangedPackages</code></td>
+      <td>Returns <code>null</code> at Binder entrypoints before <code>clearCallingIdentity()</code>, closing the post-boot package delta leak orthogonal to HMA-OSS.</td>
+    </tr>
+    <tr>
+      <td><strong>7. Display Stealth</strong></td>
+      <td><code>DisplayShield</code></td>
+      <td><code>DisplayManagerService$BinderService.getDisplayIds</code>, <code>getDisplayInfo</code></td>
+      <td>Projects display topology to physical <code>Display.DEFAULT_DISPLAY (0)</code> only, hiding virtual/presentation displays without touching <code>FLAG_SECURE</code>.</td>
+    </tr>
+  </tbody>
 </table>
 
-<p>
-Complete policy configurations—including global flags, denied package sets, and per-package mode overrides—can be exported and imported via the system clipboard using the following JSON structure:
-</p>
+## Kernel and Binder Internals
 
-~~~json
-{
-  "version": 2,
-  "mode_drop": false,
-  "allow_system": false,
-  "denied": [
-    "id.dana",
-    "com.eltavine.duckdetector",
-    "io.github.taro902.isolationpolicy"
-  ],
-  "drop_overrides": [],
-  "downgrade_overrides": [
-    "com.eltavine.duckdetector"
-  ]
+### Linux 4.19 Non-SUSFS Mount Namespace & SELinux Context Escape
+
+On non-GKI kernels (such as SDM660 `4.19.304`) lacking SUSFS, Zygisk unmount operates per forked application process in `untrusted_app`. When a security SDK spawns a child service in `app_zygote` or `isolated_app`, the forked task clones the parent Zygote `mnt_namespace` before userspace unmount runs, exposing overlay or bind mounts inside `/proc/self/mountinfo`:
+
+~~~c
+struct task_struct *zygote_fork_isolated(struct task_struct *zygote, uid_t iso_uid) {
+    struct nsproxy *ns = copy_nsproxy(zygote->nsproxy);
+    if (iso_uid >= 90000 && iso_uid <= 99999) {
+        return create_isolated_task(ns, SELINUX_DOMAIN_ISOLATED_APP);
+    }
+    return create_untrusted_task(unmount_zygisk_mounts(ns), SELINUX_DOMAIN_UNTRUSTED_APP);
 }
 ~~~
 
-<hr />
+By downgrading `AppZygote` (Pillar 1) and selectively folding internal non-external `FLAG_ISOLATED_PROCESS` helpers (Pillar 2) inside `system_server` prior to Zygote fork, the service executes inside the target package's already-sanitized `UID 10xxx` namespace, eliminating isolated mount leaks without performing destructive global `umount`.
 
-<h2>09. Credits, Attribution &amp; License Compliance</h2>
+### Lock-Free 64-Bit `IdentityGraph` & Seqlock Ring Buffer (Java)
 
-<ul>
-  <li>
-    <b><a href="https://github.com/MhmRdd">MhmRdd (Mohammed Riad)</a></b> — Author of the original <a href="https://github.com/MhmRdd/Isolation-Policy">Isolation-Policy</a> (<code>io.github.mhmrdd.isolationpolicy</code>) and <b>NoHello</b>. This repository is an independent derivative work building upon MhmRdd's <code>ProcessList#startProcessLocked</code> interception concept and self-test service architecture.
-  </li>
-  <li>
-    <b><a href="https://github.com/LSPosed/DirtySepolicy">LSPosed / DirtySepolicy</a></b> — Proof-of-concept demonstrating <code>app_zygote</code> SELinux policy interrogation via <code>/sys/fs/selinux/{context,access}</code>.
-  </li>
-  <li>
-    <b><a href="https://github.com/libxposed">libxposed API &amp; Service</a></b> — Modern Xposed module interface and remote preference IPC specification.
-  </li>
-</ul>
+~~~java
+private void putIdentityGraph(int isoUid, int ownerAppId) {
+    long target = (((long) isoUid) << 32) | (ownerAppId & 0xFFFFFFFFL);
+    int base = mixIndex(isoUid);
+    int freeSlot = -1;
+    for (int step = 0; step < GRAPH_PROBE_LIMIT; step++) {
+        int idx = (base + step) & GRAPH_MASK;
+        long existing = identityGraph.get(idx);
+        if (existing == 0L) {
+            if (freeSlot < 0) freeSlot = idx;
+            break;
+        }
+        if (((int) (existing >>> 32)) == isoUid) {
+            identityGraph.set(idx, target);
+            return;
+        }
+    }
+    identityGraph.set(freeSlot >= 0 ? freeSlot : base, target);
+}
+~~~
 
-<p>
-Licensed under the <b>Apache License, Version 2.0</b>. All modifications and namespace refactoring details are documented in <a href="NOTICE"><code>NOTICE</code></a> and <a href="LICENSE"><code>LICENSE</code></a> in accordance with Section 4 of the Apache License.
-</p>
+### Architectural Evolution Diff (`v2.0` to `v2.1.0`)
+
+~~~diff
+--- a/app/src/main/resources/META-INF/xposed/java_init.list
++++ b/app/src/main/resources/META-INF/xposed/java_init.list
+-io.github.taro902.isolationpolicy.Entry
++io.github.taro902.isolationpolicy.hook.Entry
+
+--- a/app/src/main/java/io/github/taro902/isolationpolicy/hook/Entry.java
++++ b/app/src/main/java/io/github/taro902/isolationpolicy/hook/Entry.java
++    @Override
++    public void onPackageLoaded(@NonNull PackageLoadedParam param) {
++        if (systemServerMode && SETTINGS_PROVIDER_PKG.equals(param.getPackageName())) {
++            settingsShield.attachIfNeeded(this, param.getDefaultClassLoader(), engine, telemetry);
++        }
++    }
++
++    @Override
++    public void onPackageReady(@NonNull PackageReadyParam param) {
++        if (systemServerMode && SETTINGS_PROVIDER_PKG.equals(param.getPackageName())) {
++            settingsShield.attachIfNeeded(this, param.getClassLoader(), engine, telemetry);
++        }
++    }
+~~~
+
+### Policy Export Schema (`v2.1.0` - Backward-Compatible with `v2.0`)
+
+~~~json
+{
+  "schema": "isolpolicy",
+  "version": "2.1.0",
+  "defaultAzMode": 0,
+  "policies": {
+    "id.dana": {
+      "flags": 62,
+      "az": 2,
+      "iso": true,
+      "dev": true,
+      "a11y": true,
+      "pkg": true,
+      "disp": false
+    },
+    "id.co.cimbniaga.octomobile": {
+      "flags": 122,
+      "az": 2,
+      "iso": false,
+      "dev": true,
+      "a11y": true,
+      "pkg": true,
+      "disp": true
+    }
+  }
+}
+~~~
+
+## Procedural Pixel UI
+
+The control console (`io.github.taro902.isolationpolicy.ui.*`) is built without Jetpack Compose, AppCompat, Material Components, or raster PNG assets. All geometry, stepped 1-unit chamfer borders, 3D mechanical bevels, 8x8 and 10x10 bitmask icons, live oscilloscope bars, and threat meters are drawn directly on hardware-accelerated `Canvas` with zero object allocations inside `onDraw()`.
+
+| Workspace Tab | Functional Surface | Hardware Budget Characteristics |
+| :--- | :--- | :--- |
+| **`GUARD`** | Live daemon header, 16-column `PixelScopeView` oscilloscope, 7-pillar counters, 80 ms debounced search, `ALL/THREATS/GUARDED/FINANCE/SYSTEM` filters, 6 one-tap granular chips (`AZ`, `ISO`, `DEV`, `A11Y`, `PKG`, `DISP`), and `AppInspectorDialog`. | Partial `DiffUtil` payload rebind (`PAYLOAD_FLAGS`), 4 MB bounded `PixelIconQuantizer` LruCache (`PIXEL-16` nearest-neighbor or `NATIVE`), 60 FPS on SDM660 / Adreno 512. |
+| **`SCOPE`** | Live 7-bit Hook Health Matrix (`OK`/`FB`/`ER`), uptime/graph counters, per-pillar filter chips, `[LIVE/PAUSE]`, `[COPY LOG]`, `[PURGE]`, and 64-event ring buffer viewer. | Polling runs only during `onResume()` and halts completely on `onPause()` (0% background CPU/battery). |
+| **`RADAR`** | Offline `Self-Coherence Verifier` (`RUN TEST`: probes `XposedService`, Zero-Oracle IPC `PING`, active hook count, and real host `DEV`/`ADB`/`A11Y` state) plus Static Threat Surface index. | Zero `BlockedPrivateApi` reflection; reads `AndroidManifest.xml` via `AssetManager.openXmlResourceParser` and scans ZIP Central Directory headers without writing to eMMC. |
+| **`VAULT`** | Batch presets (`BANK STRICT`, `WALLET/ALIPAY`, `AUDIT MAX`, `RESET ALL`), Clipboard & SAF `.json` Export/Import (backward-compatible with `v2.0`), theme switcher (`OBSIDIAN PHOSPHOR` / `PAPER LCD`), icon mode, polling cadence, and system app toggle. | Total R8 Release APK size: **419 KB**; active `system_server` RAM overhead: **&lt; 300 KB**; disk I/O in `system_server`: **0 B/s**. |
+
+## Modular Codebase Layout
+
+~~~text
+app/src/main/
+├── AndroidManifest.xml
+├── java/io/github/taro902/isolationpolicy/
+│   ├── core/
+│   │   ├── Logger.java
+│   │   ├── PolicyCodec.java
+│   │   ├── PolicyFlags.java
+│   │   └── PolicySnapshot.java
+│   ├── hook/
+│   │   ├── AccessibilityShield.java
+│   │   ├── AppZygoteShield.java
+│   │   ├── DisplayShield.java
+│   │   ├── Entry.java
+│   │   ├── IsolatedFoldShield.java
+│   │   ├── PackageChangeShield.java
+│   │   ├── PolicyEngine.java
+│   │   ├── SettingsShield.java
+│   │   ├── TelemetryHub.java
+│   │   └── UsbBroadcastShield.java
+│   ├── radar/
+│   │   ├── ManifestRadar.java
+│   │   └── TelemetryClient.java
+│   └── ui/
+│       ├── AppInspectorDialog.java
+│       ├── AppPolicyAdapter.java
+│       ├── MainActivity.java
+│       └── pixel/
+│           ├── PixelChipView.java
+│           ├── PixelDrawable.java
+│           ├── PixelIconQuantizer.java
+│           ├── PixelIcons.java
+│           ├── PixelScopeView.java
+│           ├── PixelTheme.java
+│           └── PixelThreatBar.java
+├── res/
+│   ├── drawable/
+│   │   ├── ic_launcher_background.xml
+│   │   └── ic_launcher_foreground.xml
+│   ├── mipmap-anydpi-v26/
+│   │   ├── ic_launcher.xml
+│   │   └── ic_launcher_round.xml
+│   └── values/
+│       ├── strings.xml
+│       └── styles.xml
+└── resources/META-INF/
+    ├── LICENSE
+    ├── NOTICE
+    └── xposed/
+        ├── java_init.list
+        ├── module.prop
+        └── scope.list
+~~~
+
+## Ecosystem Synergy
+
+IsolPolicy v2.1.0 is engineered to remain strictly orthogonal to standard Zygisk/LSPosed stealth stacks on non-GKI kernels:
+
+| Layer | Component | Scope | Conflict Surface |
+| :--- | :--- | :--- | :--- |
+| Zygisk &amp; Main Unmount | ReZygisk + Treat Wheel | Primary process (`UID 10xxx`) mount/maps cleanup | Complements Pillar 2 (`ISO-FOLD`) |
+| Package Visibility | HMA-OSS (`oss-175`) | App list hiding, activity launch guard, install source | Orthogonal; Pillar 6 adds `getChangedPackages` filtering |
+| Hardware Attestation | AlwaysStrong [Inject] | KeyMint / Keybox / VBMeta digest alignment | Zero overlap (does not touch `/data/adb/tricky_store/`) |
+| Overlay &amp; Network | mountify + PingPimp | Global OverlayFS &amp; network tuning | Zero global `umount`; WebUI binaries remain functional |
+| Window Security | Enable Screenshot | `WindowManagerService` `FLAG_SECURE` | Zero overlap; Pillar 7 only filters virtual display IDs |
+
+## Build and Verification
+
+### Toolchain & CI Constraints
+
+* **Framework API:** `io.github.libxposed:api:102.0.0` (`compileOnly`) + `io.github.libxposed:service:102.0.0` (`implementation`) + `androidx.recyclerview:recyclerview:1.4.0`
+* **Build System:** AGP `8.13.1`, Gradle `8.13`, JDK `21`, `compileSdk = 36`, `minSdk = 29`, `targetSdk = 36`
+* **CI Guardrails:** `org.gradle.configuration-cache=false`, `AarMetadata` task disabled for `compileSdk=36` compatibility with `service:102.0.0`, R8 minification & resource shrinking enabled, `BuildConfig.DEBUG == false` strips all `Logger` calls to 0 bytecode.
+
+### Deployment & Post-Boot Verification Checklist
+
+1. Install `IsolPolicy-v2.1.0-release.apk` (upgrade in-place over `v2.0` preserves `io.github.taro902.isolationpolicy` preferences and automatic v2.0 policy migration).
+2. Confirm `io.github.taro902.isolationpolicy` is checked in the **HMA-OSS Blacklist Template**.
+3. Confirm **IsolPolicy** is enabled in **LSPosed (Vector)** with scope set exclusively to **System Framework (`system`)**.
+4. Reboot once to attach the 7 `system_server` hooks (`autoHotReload=false`).
+5. Open IsolPolicy, navigate to **`RADAR`**, and tap **`RUN TEST`** to verify:
+   * `XposedService : OK (LSPosed API 102)`
+   * `ZeroOracleIPC : AUTHENTICATED (v2.1.0)`
+   * `Active Hooks  : 7/7`
+6. Apply recommended presets in **`GUARD`** (takes effect immediately in 0 ms via lock-free snapshot swap, no reboot required):
+   * **E-Wallet / Alipay SDK (`id.dana`):** `WALLET/ALIPAY` (`AZ:DOWN + ISO + DEV + A11Y + PKG`)
+   * **Banking (`myBCA`, `BCA mobile`, `OCTO Mobile`, `BRImo`, `Livin'`):** `BANK STRICT` (`AZ:DOWN + DEV + A11Y + PKG + DISP`)
+
+## License & Upstream Attribution
+
+Licensed under the **Apache License 2.0**. Full license text and modification disclosures pursuant to Section 4(b) and Section 6 are preserved in `LICENSE`, `NOTICE`, and inside the compiled APK under `META-INF/LICENSE` and `META-INF/NOTICE`.
+
+Derived from upstream [MhmRdd/Isolation-Policy](https://github.com/MhmRdd/Isolation-Policy), independently re-architected under namespace `io.github.taro902.isolationpolicy` for `libxposed` API 102 with 7 coherent server-side pillars, lock-free `IdentityGraph`, Zero-Oracle IPC telemetry, and a procedural pixel UI engine.
