@@ -113,6 +113,7 @@ jobs:
           tag_name: v${{ steps.meta.outputs.version }}
           name: IsolPolicy v${{ steps.meta.outputs.version }}
           prerelease: false
+          body_path: RELEASE_NOTES.md
           files: |
             ${{ steps.stage.outputs.release }}
             ${{ steps.stage.outputs.debug }}
