@@ -34,11 +34,26 @@ public final class ManifestRadar {
             "id.dana", "com.bca", "mybca", "cimbniaga", "octomobile",
             "id.co.bri", "brimo", "bankmandiri", "livin", "id.bni", "wondr",
             "seabank", "bankjago", "jago", "blubybcadigital", "ovo.id",
-            "shopeepay", "linkaja", "jenius", "btpn", "ocbc", "danamon",
-            "permata", "bankbsi", "bsimobile", "allobank", "krom", "superbank",
-            "neobank", "bnc", "flip", "bibit", "ajaib", "stockbit",
-            "gojek", "gopay", "kredivo", "akulaku", "indodax", "pintu",
-            "maybank", "panin", "mega", "uob", "hsbc", "dbs", "citi", "btn"
+            "shopeepay", "com.shopee.id", "linkaja", "jenius", "btpn",
+            "ocbc", "danamon", "permata", "bankbsi", "bsimobile",
+            "allobank", "krom", "superbank", "neobank", "bnc", "flip",
+            "bibit", "ajaib", "stockbit", "gojek", "gopay", "kredivo",
+            "akulaku", "indodax", "pintu", "maybank", "panin", "mega",
+            "uob", "hsbc", "dbs", "citi", "btn"
+    };
+
+    private static final String[] SANDBOX_PREFIXES = {
+            "com.android.chrome", "com.chrome.", "com.brave.browser",
+            "org.mozilla.firefox", "org.mozilla.fenix", "com.microsoft.emmx",
+            "com.opera.", "com.sec.android.app.sbrowser", "com.vivaldi.browser",
+            "com.duckduckgo.mobile.android", "com.kiwibrowser.",
+            "com.google.android.webview", "com.android.webview", "org.chromium.",
+            "com.whatsapp", "org.telegram.", "org.thunderdog.challegram",
+            "com.facebook.", "com.instagram.", "com.instaprime.",
+            "com.google.android.googlequicksearchbox", "com.google.android.apps.docs",
+            "com.google.android.gm", "com.google.android.youtube",
+            "com.zhiliaoapp.musically", "com.ss.android.ugc.", "com.twitter.android",
+            "com.discord", "com.lemon.lvoverseas"
     };
 
     private static final ConcurrentHashMap<String, CachedScan> CACHE = new ConcurrentHashMap<>(128);
@@ -87,17 +102,24 @@ public final class ManifestRadar {
 
         Set<String> sdks = scanNativeAntifraudSdks(pi.applicationInfo);
         boolean finance = isFinancePackage(pkg);
+        boolean sandbox = !finance && isSandboxPackage(pkg);
         boolean usesAz = !azServices.isEmpty() || (axml.zygotePreloadName != null && !axml.zygotePreloadName.isEmpty());
 
-        int score = 0;
-        if (usesAz) score += 45;
-        if (!isoServices.isEmpty()) score += 25;
-        if (!sdks.isEmpty()) score += Math.min(35, sdks.size() * 20);
-        if (axml.queriesAllPackages) score += 10;
-        if (finance) score += 15;
-        if (score > 100) score = 100;
-
-        int recFlags = computeRecommendedFlags(usesAz, !isoServices.isEmpty(), sdks, finance, score);
+        int score;
+        int recFlags;
+        if (sandbox) {
+            score = (usesAz || !isoServices.isEmpty()) ? 12 : 0;
+            recFlags = PolicyFlags.PRESET_NONE;
+        } else {
+            score = 0;
+            if (usesAz) score += 45;
+            if (!isoServices.isEmpty()) score += 25;
+            if (!sdks.isEmpty()) score += Math.min(35, sdks.size() * 20);
+            if (axml.queriesAllPackages) score += 10;
+            if (finance) score += 15;
+            if (score > 100) score = 100;
+            recFlags = computeRecommendedFlags(usesAz, !isoServices.isEmpty(), sdks, finance, score);
+        }
 
         ScanReport report = new ScanReport(
                 usesAz,
@@ -108,6 +130,7 @@ public final class ManifestRadar {
                 axml.queriesAllPackages,
                 new ArrayList<>(sdks),
                 finance,
+                sandbox,
                 score,
                 recFlags
         );
@@ -133,7 +156,7 @@ public final class ManifestRadar {
         if (usesAz) {
             flags |= PolicyFlags.AZ_DOWNGRADE;
         }
-        if (hasInternalIso && !isWebViewLike(sdks)) {
+        if (hasInternalIso && !finance) {
             flags |= PolicyFlags.FLAG_ISO_FOLD;
         }
         if (finance || !sdks.isEmpty() || score >= 45) {
@@ -141,14 +164,10 @@ public final class ManifestRadar {
             flags |= PolicyFlags.FLAG_A11Y_COHERENT;
             flags |= PolicyFlags.FLAG_PKG_CHANGES;
         }
-        if (finance) {
+        if (finance && !usesAz) {
             flags |= PolicyFlags.FLAG_DISP_STEALTH;
         }
         return flags & PolicyFlags.ALL_SHIELDS_MASK;
-    }
-
-    private static boolean isWebViewLike(Set<String> sdks) {
-        return false;
     }
 
     private static boolean isFinancePackage(String pkg) {
@@ -158,6 +177,19 @@ public final class ManifestRadar {
         String lower = pkg.toLowerCase(Locale.ROOT);
         for (String token : FINANCE_TOKENS) {
             if (lower.contains(token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isSandboxPackage(String pkg) {
+        if (pkg == null) {
+            return false;
+        }
+        String lower = pkg.toLowerCase(Locale.ROOT);
+        for (String prefix : SANDBOX_PREFIXES) {
+            if (lower.equals(prefix) || lower.startsWith(prefix)) {
                 return true;
             }
         }
@@ -284,21 +316,21 @@ public final class ManifestRadar {
 
     private static void classifyNativeLib(String lib, Set<String> found) {
         if (lib.startsWith("libapse") || lib.startsWith("libsgmain") || lib.startsWith("libsgsecurity")) {
-            found.add("ALIPAY_APSE");
+            found.add("ALIPAY");
         } else if (lib.contains("promon") || lib.contains("shield_jni")) {
-            found.add("PROMON_SHIELD");
-        } else if (lib.contains("vguard") || lib.contains("voswrapper") || lib.contains("vkey")) {
-            found.add("VKEY_VGUARD");
+            found.add("PROMON");
+        } else if (lib.startsWith("libvguard") || lib.startsWith("libvoswrapper") || lib.startsWith("libvkey")) {
+            found.add("VKEY");
         } else if (lib.contains("appsealing") || lib.contains("covault")) {
             found.add("APPSEALING");
-        } else if (lib.contains("libtmx") || lib.contains("tmxprofiling")) {
+        } else if (lib.startsWith("libtmx") || lib.contains("tmxprofiling")) {
             found.add("THREATMETRIX");
         } else if (lib.contains("dexprotector")) {
-            found.add("DEXPROTECTOR");
+            found.add("DEXPROT");
         } else if (lib.contains("jiagu") || lib.contains("dexhelper") || lib.contains("secneo")) {
-            found.add("PACKER_GUARD");
-        } else if (lib.contains("liapp") || lib.contains("ijm") || lib.contains("bangcle")) {
-            found.add("HARDENED_SDK");
+            found.add("PACKER");
+        } else if (lib.startsWith("libliapp") || lib.contains("bangcle")) {
+            found.add("HARDENED");
         }
     }
 
@@ -330,6 +362,7 @@ public final class ManifestRadar {
                 false,
                 Collections.emptyList(),
                 false,
+                false,
                 0,
                 0
         );
@@ -342,6 +375,7 @@ public final class ManifestRadar {
         public final boolean queriesAllPackages;
         public final List<String> antifraudSdks;
         public final boolean financeLikely;
+        public final boolean isSandbox;
         public final int threatScore;
         public final int recommendedFlags;
 
@@ -354,6 +388,7 @@ public final class ManifestRadar {
                 boolean queriesAllPackages,
                 List<String> antifraudSdks,
                 boolean financeLikely,
+                boolean isSandbox,
                 int threatScore,
                 int recommendedFlags
         ) {
@@ -365,12 +400,20 @@ public final class ManifestRadar {
             this.queriesAllPackages = queriesAllPackages;
             this.antifraudSdks = Collections.unmodifiableList(antifraudSdks);
             this.financeLikely = financeLikely;
+            this.isSandbox = isSandbox;
             this.threatScore = threatScore;
             this.recommendedFlags = recommendedFlags;
         }
 
         public boolean isThreat() {
+            if (isSandbox) {
+                return false;
+            }
             return usesAppZygote || !isolatedServices.isEmpty() || !antifraudSdks.isEmpty();
+        }
+
+        public boolean isActionableTarget() {
+            return !isSandbox && (financeLikely || isThreat());
         }
     }
 }

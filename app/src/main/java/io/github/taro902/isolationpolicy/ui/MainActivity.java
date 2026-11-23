@@ -61,12 +61,15 @@ import io.github.taro902.isolationpolicy.core.PolicyCodec;
 import io.github.taro902.isolationpolicy.core.PolicyFlags;
 import io.github.taro902.isolationpolicy.radar.ManifestRadar;
 import io.github.taro902.isolationpolicy.radar.TelemetryClient;
-import io.github.taro902.isolationpolicy.ui.pixel.PixelChipView;
-import io.github.taro902.isolationpolicy.ui.pixel.PixelDrawable;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelChrome;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelCounterStrip;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelDockBar;
 import io.github.taro902.isolationpolicy.ui.pixel.PixelIconQuantizer;
-import io.github.taro902.isolationpolicy.ui.pixel.PixelIcons;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelKeycapView;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelPalette;
 import io.github.taro902.isolationpolicy.ui.pixel.PixelScopeView;
-import io.github.taro902.isolationpolicy.ui.pixel.PixelTheme;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelSpriteAtlas;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelTextView;
 
 @SuppressWarnings("deprecation")
 public final class MainActivity extends Activity {
@@ -84,9 +87,9 @@ public final class MainActivity extends Activity {
     private static final int TAB_VAULT = 3;
 
     private static final int FILTER_ALL = 0;
-    private static final int FILTER_THREATS = 1;
+    private static final int FILTER_FINANCE = 1;
     private static final int FILTER_GUARDED = 2;
-    private static final int FILTER_FINANCE = 3;
+    private static final int FILTER_THREATS = 3;
     private static final int FILTER_SYSTEM = 4;
 
     private static final int REQ_EXPORT_JSON = 7101;
@@ -99,9 +102,10 @@ public final class MainActivity extends Activity {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService bgExecutor = Executors.newSingleThreadExecutor();
     private final Map<String, Integer> policyMap = new HashMap<>();
+    private final Map<String, Integer> liveHitsMap = new HashMap<>();
     private final List<AppPolicyAdapter.AppItem> allApps = new ArrayList<>();
 
-    private PixelTheme theme;
+    private PixelPalette pal;
     private PixelIconQuantizer iconQuantizer;
     private SharedPreferences uiPrefs;
     private AppPolicyAdapter adapter;
@@ -115,6 +119,7 @@ public final class MainActivity extends Activity {
     private int pollIntervalMs = 1500;
     private boolean streamPaused;
     private boolean activityResumed;
+    private boolean ledPhase;
     private long lastTotalCount = -1L;
 
     private TelemetryClient.SnapshotData lastSnapshot = TelemetryClient.SnapshotData.DISCONNECTED;
@@ -124,27 +129,33 @@ public final class MainActivity extends Activity {
     private View tabScopeView;
     private View tabRadarView;
     private View tabVaultView;
-    private final LinearLayout[] dockButtons = new LinearLayout[4];
+    private PixelDockBar dockBar;
 
-    private TextView tvStatusBanner;
-    private TextView tvPillarStats;
+    private PixelTextView tvTopApiStatus;
+    private PixelTextView tvDeckState;
+    private PixelTextView tvDeckCounts;
     private PixelScopeView scopeView;
-    private final PixelChipView[] filterChips = new PixelChipView[5];
+    private PixelCounterStrip counterStrip;
+    private EditText searchBox;
+    private ImageView btnClearSearch;
+    private final PixelKeycapView[] filterKeys = new PixelKeycapView[5];
 
-    private TextView tvScopeHeader;
-    private TextView tvHookMatrix;
-    private TextView tvStreamLog;
-    private PixelChipView btnPauseStream;
-    private final PixelChipView[] scopeFilterChips = new PixelChipView[8];
+    private PixelTextView tvScopeUptime;
+    private final PixelTextView[] hookTiles = new PixelTextView[7];
+    private LinearLayout streamRowsContainer;
+    private PixelKeycapView btnPauseStream;
+    private final PixelKeycapView[] scopeFilterKeys = new PixelKeycapView[8];
+    private String lastCopiedLog = "";
 
-    private TextView tvDiagOutput;
-    private TextView tvRadarSummary;
-    private LinearLayout radarThreatContainer;
+    private LinearLayout diagRowsContainer;
+    private PixelTextView tvRadarHeader;
+    private LinearLayout radarFinanceContainer;
+    private LinearLayout radarSandboxContainer;
 
-    private PixelChipView btnThemeToggle;
-    private PixelChipView btnIconToggle;
-    private PixelChipView btnPollToggle;
-    private PixelChipView btnSysToggle;
+    private final PixelKeycapView[] paletteKeys = new PixelKeycapView[4];
+    private PixelKeycapView btnIconToggle;
+    private PixelKeycapView btnPollToggle;
+    private PixelKeycapView btnSysToggle;
 
     private final Runnable searchDebounceTask = this::applyFilterAndBind;
     private final Runnable pollTask = new Runnable() {
@@ -153,6 +164,7 @@ public final class MainActivity extends Activity {
             if (!activityResumed) {
                 return;
             }
+            ledPhase = !ledPhase;
             pollTelemetryOnce();
             if (pollIntervalMs > 0) {
                 mainHandler.postDelayed(this, pollIntervalMs);
@@ -166,12 +178,12 @@ public final class MainActivity extends Activity {
         sActiveActivity = new WeakReference<>(this);
 
         uiPrefs = getSharedPreferences(UI_PREFS, MODE_PRIVATE);
-        int themeMode = uiPrefs.getInt(KEY_UI_THEME, PixelTheme.MODE_OBSIDIAN);
+        int themeMode = uiPrefs.getInt(KEY_UI_THEME, PixelPalette.MODE_CRT);
         pixelizeIcons = uiPrefs.getBoolean(KEY_UI_PIXEL_ICON, true);
         pollIntervalMs = uiPrefs.getInt(KEY_UI_POLL_MS, 1500);
         showSystemApps = uiPrefs.getBoolean(KEY_UI_SHOW_SYS, false);
 
-        theme = new PixelTheme(this, themeMode);
+        pal = new PixelPalette(this, themeMode);
         iconQuantizer = new PixelIconQuantizer();
 
         loadPoliciesFromAvailableStore();
@@ -220,8 +232,8 @@ public final class MainActivity extends Activity {
         if (w == null) {
             return;
         }
-        w.setStatusBarColor(theme.bgCanvas);
-        w.setNavigationBarColor(theme.bgPanel);
+        w.setStatusBarColor(pal.bgCanvas);
+        w.setNavigationBarColor(pal.bgPanel);
         View decor = w.getDecorView();
         if (decor == null) {
             return;
@@ -233,11 +245,11 @@ public final class MainActivity extends Activity {
                     if (ctrl != null) {
                         int mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
                                 | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
-                        ctrl.setSystemBarsAppearance(theme.isDark() ? 0 : mask, mask);
+                        ctrl.setSystemBarsAppearance(pal.isDark() ? 0 : mask, mask);
                     }
                 } else {
                     int vis = decor.getSystemUiVisibility();
-                    if (theme.isDark()) {
+                    if (pal.isDark()) {
                         vis &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
                     } else {
                         vis |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
@@ -282,7 +294,7 @@ public final class MainActivity extends Activity {
     private void onXposedServiceReady() {
         loadPoliciesFromAvailableStore();
         syncPoliciesToStores();
-        rebuildAppFlagsFromMap();
+        rebuildAppFlagsAndHits();
         applyFilterAndBind();
         pollTelemetryOnce();
     }
@@ -352,40 +364,56 @@ public final class MainActivity extends Activity {
     }
 
     private void buildRootUi() {
-        int u = theme.px;
+        int u = pal.px;
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(theme.bgCanvas);
+        root.setBackgroundColor(pal.bgCanvas);
         root.setFitsSystemWindows(true);
 
         LinearLayout topBar = new LinearLayout(this);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
         topBar.setGravity(Gravity.CENTER_VERTICAL);
-        topBar.setPadding(u * 5, u * 4, u * 5, u * 3);
+        topBar.setPadding(u * 4, u * 4, u * 4, u * 3);
         root.addView(topBar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         ));
 
-        ImageView brandIcon = new ImageView(this);
-        brandIcon.setImageDrawable(PixelIcons.createDrawable(getResources(), PixelIcons.SHIELD_10, 10, u, theme.accentOk));
-        LinearLayout.LayoutParams biLp = new LinearLayout.LayoutParams(u * 10, u * 10);
-        biLp.setMarginEnd(u * 3);
-        topBar.addView(brandIcon, biLp);
+        ImageView crest = new ImageView(this);
+        crest.setImageDrawable(PixelSpriteAtlas.createDrawable(
+                getResources(),
+                PixelSpriteAtlas.SHIELD_14,
+                Math.max(2, pal.smallFontScale),
+                pal.ok,
+                pal.info,
+                pal.outline
+        ));
+        LinearLayout.LayoutParams crLp = new LinearLayout.LayoutParams(
+                14 * Math.max(2, pal.smallFontScale),
+                14 * Math.max(2, pal.smallFontScale)
+        );
+        crLp.setMarginEnd(u * 3);
+        topBar.addView(crest, crLp);
 
-        TextView brandTitle = new TextView(this);
-        brandTitle.setTypeface(theme.monoBold);
-        brandTitle.setTextSize(14f);
-        brandTitle.setTextColor(theme.inkPrimary);
-        brandTitle.setText("ISOLPOLICY " + PolicyFlags.VERSION_NAME);
-        topBar.addView(brandTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        PixelTextView titleView = new PixelTextView(this, "ISOLPOLICY", pal.inkPrimary, pal.titleFontScale);
+        topBar.addView(titleView);
 
-        TextView apiTag = new TextView(this);
-        apiTag.setTypeface(theme.monoBold);
-        apiTag.setTextSize(10f);
-        apiTag.setTextColor(theme.accentInfo);
-        apiTag.setText("API102 // SYS");
-        topBar.addView(apiTag);
+        PixelTextView verBadge = new PixelTextView(this, PolicyFlags.VERSION_NAME, pal.ok, pal.smallFontScale);
+        verBadge.setBackground(PixelChrome.inset(pal));
+        verBadge.setPadding(u * 3, u * 2, u * 3, u * 2);
+        LinearLayout.LayoutParams vbLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        vbLp.setMarginStart(u * 3);
+        topBar.addView(verBadge, vbLp);
+
+        View spacer = new View(this);
+        topBar.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
+
+        tvTopApiStatus = new PixelTextView(this, "API 102", pal.info, pal.smallFontScale);
+        tvTopApiStatus.setLed(true, pal.warn, pal.ledSpec);
+        topBar.addView(tvTopApiStatus);
 
         contentHost = new FrameLayout(this);
         root.addView(contentHost, new LinearLayout.LayoutParams(
@@ -404,8 +432,9 @@ public final class MainActivity extends Activity {
         contentHost.addView(tabRadarView);
         contentHost.addView(tabVaultView);
 
-        LinearLayout dock = buildDockBar();
-        root.addView(dock, new LinearLayout.LayoutParams(
+        dockBar = new PixelDockBar(this, pal);
+        dockBar.setOnTabSelectedListener(this::selectTab);
+        root.addView(dockBar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         ));
@@ -415,15 +444,15 @@ public final class MainActivity extends Activity {
     }
 
     private View buildGuardTab() {
-        int u = theme.px;
+        int u = pal.px;
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setPadding(u * 4, 0, u * 4, u * 2);
 
         LinearLayout deck = new LinearLayout(this);
         deck.setOrientation(LinearLayout.VERTICAL);
-        deck.setBackground(PixelDrawable.panel(theme));
-        deck.setPadding(u * 4, u * 4, u * 4, u * 4);
+        deck.setBackground(PixelChrome.panel(pal, true));
+        deck.setPadding(u * 4, u * 4, u * 5, u * 5);
         wrap.addView(deck, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -441,31 +470,35 @@ public final class MainActivity extends Activity {
         statusCol.setOrientation(LinearLayout.VERTICAL);
         deckTop.addView(statusCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        tvStatusBanner = new TextView(this);
-        tvStatusBanner.setTypeface(theme.monoBold);
-        tvStatusBanner.setTextSize(11.5f);
-        tvStatusBanner.setTextColor(theme.accentWarn);
-        tvStatusBanner.setFontFeatureSettings("tnum");
-        tvStatusBanner.setText("DAEMON: PROBING...");
-        statusCol.addView(tvStatusBanner);
+        tvDeckState = new PixelTextView(this, "PROBING SYSTEM", pal.warn, pal.fontScale);
+        tvDeckState.setLed(true, pal.warn, pal.ledSpec);
+        statusCol.addView(tvDeckState);
 
-        tvPillarStats = new TextView(this);
-        tvPillarStats.setTypeface(theme.monoRegular);
-        tvPillarStats.setTextSize(10f);
-        tvPillarStats.setTextColor(theme.inkSecondary);
-        tvPillarStats.setFontFeatureSettings("tnum");
-        tvPillarStats.setText("AZ:0 ISO:0 SET:0 USB:0 A11Y:0 PKG:0 DISP:0");
-        LinearLayout.LayoutParams psLp = new LinearLayout.LayoutParams(
+        tvDeckCounts = new PixelTextView(this, "0 GUARDED   0 GRAPH", pal.inkSecondary, pal.smallFontScale);
+        LinearLayout.LayoutParams dcLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        dcLp.topMargin = u * 3;
+        statusCol.addView(tvDeckCounts, dcLp);
+
+        scopeView = new PixelScopeView(this, pal);
+        LinearLayout.LayoutParams scLp = new LinearLayout.LayoutParams(pal.dp(120), pal.dp(44));
+        scLp.setMarginStart(u * 3);
+        deckTop.addView(scopeView, scLp);
+
+        counterStrip = new PixelCounterStrip(this, pal);
+        counterStrip.setOnPillarTapListener(pillarId -> {
+            scopePillarFilter = pillarId;
+            refreshScopeFilterKeys();
+            selectTab(TAB_SCOPE);
+        });
+        LinearLayout.LayoutParams csLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        psLp.topMargin = u * 2;
-        statusCol.addView(tvPillarStats, psLp);
-
-        scopeView = new PixelScopeView(this, theme);
-        LinearLayout.LayoutParams scLp = new LinearLayout.LayoutParams(theme.dp(110), theme.dp(40));
-        scLp.setMarginStart(u * 3);
-        deckTop.addView(scopeView, scLp);
+        csLp.topMargin = u * 3;
+        deck.addView(counterStrip, csLp);
 
         LinearLayout searchRow = new LinearLayout(this);
         searchRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -477,15 +510,54 @@ public final class MainActivity extends Activity {
         srLp.topMargin = u * 3;
         wrap.addView(searchRow, srLp);
 
-        EditText searchBox = new EditText(this);
-        searchBox.setBackground(PixelDrawable.inset(theme));
-        searchBox.setTypeface(theme.monoRegular);
+        LinearLayout searchWell = new LinearLayout(this);
+        searchWell.setOrientation(LinearLayout.HORIZONTAL);
+        searchWell.setGravity(Gravity.CENTER_VERTICAL);
+        searchWell.setBackground(PixelChrome.inset(pal));
+        searchWell.setPadding(u * 3, u * 2, u * 3, u * 2);
+        searchRow.addView(searchWell, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        ImageView searchIco = new ImageView(this);
+        searchIco.setImageDrawable(PixelSpriteAtlas.createDrawable(
+                getResources(),
+                PixelSpriteAtlas.SEARCH_9,
+                Math.max(2, pal.smallFontScale),
+                pal.inkMuted,
+                pal.info,
+                pal.outline
+        ));
+        LinearLayout.LayoutParams siLp = new LinearLayout.LayoutParams(
+                9 * Math.max(2, pal.smallFontScale),
+                9 * Math.max(2, pal.smallFontScale)
+        );
+        siLp.setMarginEnd(u * 2);
+        searchWell.addView(searchIco, siLp);
+
+        searchBox = new EditText(this);
+        searchBox.setBackground(null);
+        searchBox.setTypeface(pal.monoRegular);
         searchBox.setTextSize(12f);
-        searchBox.setTextColor(theme.inkPrimary);
-        searchBox.setHintTextColor(theme.inkMuted);
-        searchBox.setHint("FILTER APP / PACKAGE...");
+        searchBox.setTextColor(pal.inkPrimary);
+        searchBox.setHintTextColor(pal.inkMuted);
+        searchBox.setHint("Search app or package");
         searchBox.setSingleLine(true);
-        searchBox.setPadding(u * 4, u * 3, u * 4, u * 3);
+        searchBox.setPadding(0, u, 0, u);
+        searchWell.addView(searchBox, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        btnClearSearch = new ImageView(this);
+        btnClearSearch.setImageDrawable(PixelSpriteAtlas.createDrawable(
+                getResources(),
+                PixelSpriteAtlas.CLOSE_7,
+                Math.max(2, pal.smallFontScale),
+                pal.danger,
+                pal.danger,
+                pal.outline
+        ));
+        btnClearSearch.setPadding(u * 2, u, u, u);
+        btnClearSearch.setVisibility(View.GONE);
+        btnClearSearch.setOnClickListener(v -> searchBox.setText(""));
+        searchWell.addView(btnClearSearch);
+
         searchBox.addTextChangedListener(new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {
@@ -494,6 +566,7 @@ public final class MainActivity extends Activity {
             @Override
             public void onTextChanged(CharSequence s, int start, int before, int count) {
                 searchQuery = s != null ? s.toString().trim().toLowerCase(Locale.ROOT) : "";
+                btnClearSearch.setVisibility(searchQuery.isEmpty() ? View.GONE : View.VISIBLE);
                 mainHandler.removeCallbacks(searchDebounceTask);
                 mainHandler.postDelayed(searchDebounceTask, 80L);
             }
@@ -502,17 +575,17 @@ public final class MainActivity extends Activity {
             public void afterTextChanged(Editable s) {
             }
         });
-        searchRow.addView(searchBox, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        PixelChipView btnAutoThreats = new PixelChipView(this, theme);
-        btnAutoThreats.applyState("+THREATS", theme.chipOffBg, theme.accentWarnBg, theme.accentWarn, theme.accentWarn, true, false);
-        btnAutoThreats.setOnClickListener(v -> applyRecommendedToAllThreats());
-        LinearLayout.LayoutParams atLp = new LinearLayout.LayoutParams(
+        PixelKeycapView btnAutoBank = new PixelKeycapView(this, pal, false);
+        btnAutoBank.setSmallText(true);
+        btnAutoBank.applyAccent("AUTO BANK", pal.ok, pal.okBg, pal.okLip, true, false);
+        btnAutoBank.setOnClickListener(v -> applyRecommendedToActionable());
+        LinearLayout.LayoutParams abLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        atLp.setMarginStart(u * 2);
-        searchRow.addView(btnAutoThreats, atLp);
+        abLp.setMarginStart(u * 2);
+        searchRow.addView(btnAutoBank, abLp);
 
         HorizontalScrollView filterScroll = new HorizontalScrollView(this);
         filterScroll.setHorizontalScrollBarEnabled(false);
@@ -529,18 +602,20 @@ public final class MainActivity extends Activity {
         filterRow.setOrientation(LinearLayout.HORIZONTAL);
         filterScroll.addView(filterRow);
 
-        String[] labels = {"ALL", "THREATS", "GUARDED", "FINANCE", "SYSTEM"};
+        String[] labels = {"ALL", "FINANCE", "GUARDED", "THREATS", "SYSTEM"};
         for (int i = 0; i < labels.length; i++) {
             final int idx = i;
-            PixelChipView fc = new PixelChipView(this, theme);
-            fc.setOnClickListener(v -> {
+            PixelKeycapView fk = new PixelKeycapView(this, pal, false);
+            fk.setSmallText(true);
+            fk.setOnClickListener(v -> {
                 if (idx == FILTER_SYSTEM && !showSystemApps) {
                     showSystemApps = true;
                     uiPrefs.edit().putBoolean(KEY_UI_SHOW_SYS, true).apply();
+                    refreshVaultPrefKeys();
                     loadInstalledAppsAsync();
                 }
                 activeFilter = idx;
-                refreshFilterChips();
+                refreshFilterKeys();
                 applyFilterAndBind();
             });
             LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(
@@ -550,16 +625,16 @@ public final class MainActivity extends Activity {
             if (i > 0) {
                 flp.setMarginStart(u * 2);
             }
-            filterRow.addView(fc, flp);
-            filterChips[i] = fc;
+            filterRow.addView(fk, flp);
+            filterKeys[i] = fk;
         }
-        refreshFilterChips();
+        refreshFilterKeys();
 
         RecyclerView rv = new RecyclerView(this);
         rv.setLayoutManager(new LinearLayoutManager(this));
         rv.setItemAnimator(null);
         rv.setHasFixedSize(false);
-        adapter = new AppPolicyAdapter(theme, getPackageManager(), iconQuantizer, pixelizeIcons, new AppPolicyAdapter.ActionListener() {
+        adapter = new AppPolicyAdapter(pal, getPackageManager(), iconQuantizer, pixelizeIcons, new AppPolicyAdapter.ActionListener() {
             @Override
             public void onFlagsChanged(String packageName, int newFlags) {
                 updatePackageFlags(packageName, newFlags);
@@ -567,7 +642,7 @@ public final class MainActivity extends Activity {
 
             @Override
             public void onInspectRequested(AppPolicyAdapter.AppItem item) {
-                AppInspectorDialog.show(MainActivity.this, theme, item, lastSnapshot, MainActivity.this::updatePackageFlags);
+                AppInspectorDialog.show(MainActivity.this, pal, item, lastSnapshot, MainActivity.this::updatePackageFlags);
             }
         });
         rv.setAdapter(adapter);
@@ -581,94 +656,102 @@ public final class MainActivity extends Activity {
     }
 
     private View buildScopeTab() {
-        int u = theme.px;
+        int u = pal.px;
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setPadding(u * 4, 0, u * 4, u * 2);
 
         LinearLayout healthCard = new LinearLayout(this);
         healthCard.setOrientation(LinearLayout.VERTICAL);
-        healthCard.setBackground(PixelDrawable.panel(theme));
-        healthCard.setPadding(u * 4, u * 4, u * 4, u * 4);
+        healthCard.setBackground(PixelChrome.panel(pal, true));
+        healthCard.setPadding(u * 4, u * 4, u * 5, u * 5);
         wrap.addView(healthCard, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         ));
 
-        tvScopeHeader = new TextView(this);
-        tvScopeHeader.setTypeface(theme.monoBold);
-        tvScopeHeader.setTextSize(11.5f);
-        tvScopeHeader.setTextColor(theme.accentInfo);
-        tvScopeHeader.setFontFeatureSettings("tnum");
-        tvScopeHeader.setText("HOOK HEALTH MATRIX // WAITING FOR IPC");
-        healthCard.addView(tvScopeHeader);
+        tvScopeUptime = new PixelTextView(this, "HOOK HEALTH MATRIX", pal.info, pal.smallFontScale);
+        tvScopeUptime.setLed(true, pal.info, pal.ledSpec);
+        healthCard.addView(tvScopeUptime);
 
-        tvHookMatrix = new TextView(this);
-        tvHookMatrix.setTypeface(theme.monoRegular);
-        tvHookMatrix.setTextSize(10.5f);
-        tvHookMatrix.setTextColor(theme.inkPrimary);
-        tvHookMatrix.setFontFeatureSettings("tnum");
-        tvHookMatrix.setText("AZ[--] ISO[--] SET[--] USB[--] A11Y[--] PKG[--] DISP[--]");
-        LinearLayout.LayoutParams hmLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        hmLp.topMargin = u * 2;
-        healthCard.addView(tvHookMatrix, hmLp);
+        LinearLayout tileRow1 = new LinearLayout(this);
+        tileRow1.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams tr1 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tr1.topMargin = u * 3;
+        healthCard.addView(tileRow1, tr1);
+
+        LinearLayout tileRow2 = new LinearLayout(this);
+        tileRow2.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams tr2 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tr2.topMargin = u * 2;
+        healthCard.addView(tileRow2, tr2);
+
+        String[] names = {"AZ", "ISO", "SET", "USB", "A11Y", "PKG", "DISP"};
+        for (int i = 0; i < 7; i++) {
+            PixelTextView tile = new PixelTextView(this, names[i] + " --", pal.inkMuted, pal.smallFontScale);
+            tile.setLed(true, pal.ledOff, pal.ledSpec);
+            tile.setBackground(PixelChrome.inset(pal));
+            tile.setPadding(u * 3, u * 2, u * 3, u * 2);
+            LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            if (i < 4) {
+                if (i > 0) tlp.setMarginStart(u * 2);
+                tileRow1.addView(tile, tlp);
+            } else {
+                if (i > 4) tlp.setMarginStart(u * 2);
+                tileRow2.addView(tile, tlp);
+            }
+            hookTiles[i] = tile;
+        }
 
         LinearLayout ctrlRow = new LinearLayout(this);
         ctrlRow.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams crLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
+        LinearLayout.LayoutParams crLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         crLp.topMargin = u * 3;
         wrap.addView(ctrlRow, crLp);
 
-        btnPauseStream = new PixelChipView(this, theme);
-        btnPauseStream.applyState("LIVE", theme.chipOffBg, theme.accentOkBg, theme.accentOk, theme.accentOk, true, false);
+        btnPauseStream = new PixelKeycapView(this, pal, true);
+        btnPauseStream.setSmallText(true);
+        btnPauseStream.applyAccent("LIVE", pal.ok, pal.okBg, pal.okLip, true, false);
         btnPauseStream.setOnClickListener(v -> {
             streamPaused = !streamPaused;
             if (streamPaused) {
-                btnPauseStream.applyState("PAUSED", theme.chipOffBg, theme.accentWarnBg, theme.accentWarn, theme.accentWarn, true, true);
+                btnPauseStream.applyAccent("PAUSED", pal.warn, pal.warnBg, pal.warnLip, true, true);
             } else {
-                btnPauseStream.applyState("LIVE", theme.chipOffBg, theme.accentOkBg, theme.accentOk, theme.accentOk, true, true);
+                btnPauseStream.applyAccent("LIVE", pal.ok, pal.okBg, pal.okLip, true, true);
                 renderScopeStream();
             }
         });
-        ctrlRow.addView(btnPauseStream);
+        addWeightKey(ctrlRow, btnPauseStream, 0);
 
-        PixelChipView btnCopy = new PixelChipView(this, theme);
-        btnCopy.applyState("COPY LOG", theme.chipOffBg, theme.accentInfoBg, theme.accentInfo, theme.accentInfo, true, false);
+        PixelKeycapView btnCopy = new PixelKeycapView(this, pal, false);
+        btnCopy.setSmallText(true);
+        btnCopy.applyAccent("COPY LOG", pal.info, pal.infoBg, pal.infoLip, true, false);
         btnCopy.setOnClickListener(v -> {
-            copyTextToClipboard("IsolPolicy Telemetry", tvStreamLog.getText().toString());
-            toast("Telemetry copied to clipboard");
+            copyTextToClipboard("IsolPolicy Telemetry", lastCopiedLog);
+            toast("Telemetry copied");
         });
-        LinearLayout.LayoutParams cpLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        cpLp.setMarginStart(u * 2);
-        ctrlRow.addView(btnCopy, cpLp);
+        addWeightKey(ctrlRow, btnCopy, u * 2);
 
-        PixelChipView btnPurge = new PixelChipView(this, theme);
-        btnPurge.applyState("PURGE", theme.chipOffBg, theme.accentDangerBg, theme.accentDanger, theme.accentDanger, true, false);
+        PixelKeycapView btnPurge = new PixelKeycapView(this, pal, false);
+        btnPurge.setSmallText(true);
+        btnPurge.applyAccent("PURGE", pal.danger, pal.dangerBg, pal.dangerLip, true, false);
         btnPurge.setOnClickListener(v -> runBg(() -> {
             boolean ok = TelemetryClient.purge(getApplicationContext());
             mainHandler.post(() -> {
                 scopeView.clear();
+                liveHitsMap.clear();
                 lastTotalCount = 0L;
+                rebuildAppFlagsAndHits();
+                applyFilterAndBind();
                 toast(ok ? "Ring buffer purged" : "IPC offline");
                 pollTelemetryOnce();
             });
         }));
-        LinearLayout.LayoutParams pgLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        pgLp.setMarginStart(u * 2);
-        ctrlRow.addView(btnPurge, pgLp);
+        addWeightKey(ctrlRow, btnPurge, u * 2);
 
         HorizontalScrollView pilScroll = new HorizontalScrollView(this);
         pilScroll.setHorizontalScrollBarEnabled(false);
-        LinearLayout.LayoutParams psLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
+        LinearLayout.LayoutParams psLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         psLp.topMargin = u * 3;
         psLp.bottomMargin = u * 3;
         wrap.addView(pilScroll, psLp);
@@ -680,42 +763,38 @@ public final class MainActivity extends Activity {
         String[] pNames = {"ALL", "AZ", "ISO", "SET", "USB", "A11Y", "PKG", "DISP"};
         for (int i = 0; i < pNames.length; i++) {
             final int pid = i;
-            PixelChipView c = new PixelChipView(this, theme);
-            c.setOnClickListener(v -> {
+            PixelKeycapView k = new PixelKeycapView(this, pal, false);
+            k.setSmallText(true);
+            k.setOnClickListener(v -> {
                 scopePillarFilter = pid;
-                refreshScopeFilterChips();
+                refreshScopeFilterKeys();
                 renderScopeStream();
             });
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             if (i > 0) lp.setMarginStart(u * 2);
-            pilRow.addView(c, lp);
-            scopeFilterChips[i] = c;
+            pilRow.addView(k, lp);
+            scopeFilterKeys[i] = k;
         }
-        refreshScopeFilterChips();
+        refreshScopeFilterKeys();
 
         ScrollView streamScroll = new ScrollView(this);
-        streamScroll.setBackground(PixelDrawable.inset(theme));
-        streamScroll.setPadding(u * 4, u * 4, u * 4, u * 4);
+        streamScroll.setBackground(PixelChrome.inset(pal));
+        streamScroll.setPadding(u * 3, u * 3, u * 3, u * 3);
         wrap.addView(streamScroll, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 0,
                 1f
         ));
 
-        tvStreamLog = new TextView(this);
-        tvStreamLog.setTypeface(theme.monoRegular);
-        tvStreamLog.setTextSize(10.5f);
-        tvStreamLog.setTextColor(theme.inkPrimary);
-        tvStreamLog.setTextIsSelectable(true);
-        tvStreamLog.setFontFeatureSettings("tnum");
-        tvStreamLog.setText("Waiting for system_server telemetry stream...");
-        streamScroll.addView(tvStreamLog);
+        streamRowsContainer = new LinearLayout(this);
+        streamRowsContainer.setOrientation(LinearLayout.VERTICAL);
+        streamScroll.addView(streamRowsContainer);
 
         return wrap;
     }
 
     private View buildRadarTab() {
-        int u = theme.px;
+        int u = pal.px;
         ScrollView scroll = new ScrollView(this);
         scroll.setPadding(u * 4, 0, u * 4, u * 4);
 
@@ -725,8 +804,8 @@ public final class MainActivity extends Activity {
 
         LinearLayout diagCard = new LinearLayout(this);
         diagCard.setOrientation(LinearLayout.VERTICAL);
-        diagCard.setBackground(PixelDrawable.panel(theme));
-        diagCard.setPadding(u * 4, u * 4, u * 4, u * 4);
+        diagCard.setBackground(PixelChrome.panel(pal, true));
+        diagCard.setPadding(u * 4, u * 4, u * 5, u * 5);
         wrap.addView(diagCard, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -737,37 +816,33 @@ public final class MainActivity extends Activity {
         diagHeader.setGravity(Gravity.CENTER_VERTICAL);
         diagCard.addView(diagHeader);
 
-        TextView title = new TextView(this);
-        title.setTypeface(theme.monoBold);
-        title.setTextSize(12f);
-        title.setTextColor(theme.accentOk);
-        title.setText("SELF-COHERENCE VERIFIER");
+        PixelTextView title = new PixelTextView(this, "COHERENCE CHECK", pal.ok, pal.fontScale);
+        title.setLed(true, pal.ok, pal.ledSpec);
         diagHeader.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        PixelChipView btnRunDiag = new PixelChipView(this, theme);
-        btnRunDiag.applyState("RUN TEST", theme.chipOffBg, theme.accentOkBg, theme.accentOk, theme.accentOk, true, false);
+        PixelKeycapView btnRunDiag = new PixelKeycapView(this, pal, false);
+        btnRunDiag.setSmallText(true);
+        btnRunDiag.applyAccent("RUN CHECK", pal.ok, pal.okBg, pal.okLip, true, false);
         btnRunDiag.setOnClickListener(v -> runSelfDiagnosticAsync());
         diagHeader.addView(btnRunDiag);
 
-        tvDiagOutput = new TextView(this);
-        tvDiagOutput.setTypeface(theme.monoRegular);
-        tvDiagOutput.setTextSize(10.5f);
-        tvDiagOutput.setTextColor(theme.inkPrimary);
-        tvDiagOutput.setBackground(PixelDrawable.inset(theme));
-        tvDiagOutput.setPadding(u * 3, u * 3, u * 3, u * 3);
-        tvDiagOutput.setFontFeatureSettings("tnum");
-        tvDiagOutput.setText("Tap RUN TEST to probe XposedService, Zero-Oracle IPC, 7 hooks, and host DEV/ADB/A11Y state.");
+        diagRowsContainer = new LinearLayout(this);
+        diagRowsContainer.setOrientation(LinearLayout.VERTICAL);
+        diagRowsContainer.setBackground(PixelChrome.inset(pal));
+        diagRowsContainer.setPadding(u * 3, u * 3, u * 3, u * 3);
         LinearLayout.LayoutParams doLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         );
         doLp.topMargin = u * 3;
-        diagCard.addView(tvDiagOutput, doLp);
+        diagCard.addView(diagRowsContainer, doLp);
+
+        addDiagRow("SYSTEM", "Tap RUN CHECK to probe service, IPC, hooks, and host flags", pal.inkSecondary, pal.ledOff);
 
         LinearLayout radarCard = new LinearLayout(this);
         radarCard.setOrientation(LinearLayout.VERTICAL);
-        radarCard.setBackground(PixelDrawable.panel(theme));
-        radarCard.setPadding(u * 4, u * 4, u * 4, u * 4);
+        radarCard.setBackground(PixelChrome.panel(pal, false));
+        radarCard.setPadding(u * 4, u * 4, u * 5, u * 5);
         LinearLayout.LayoutParams rcLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -780,36 +855,41 @@ public final class MainActivity extends Activity {
         rHead.setGravity(Gravity.CENTER_VERTICAL);
         radarCard.addView(rHead);
 
-        tvRadarSummary = new TextView(this);
-        tvRadarSummary.setTypeface(theme.monoBold);
-        tvRadarSummary.setTextSize(11.5f);
-        tvRadarSummary.setTextColor(theme.accentWarn);
-        tvRadarSummary.setText("STATIC THREAT SURFACE");
-        rHead.addView(tvRadarSummary, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        tvRadarHeader = new PixelTextView(this, "FINANCE AND SECURITY", pal.warn, pal.fontScale);
+        rHead.addView(tvRadarHeader, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        PixelChipView btnRescan = new PixelChipView(this, theme);
-        btnRescan.applyState("RESCAN", theme.chipOffBg, theme.accentInfoBg, theme.accentInfo, theme.accentInfo, true, false);
+        PixelKeycapView btnRescan = new PixelKeycapView(this, pal, false);
+        btnRescan.setSmallText(true);
+        btnRescan.applyAccent("RESCAN", pal.info, pal.infoBg, pal.infoLip, true, false);
         btnRescan.setOnClickListener(v -> {
             ManifestRadar.clearCache();
             loadInstalledAppsAsync();
-            toast("Rescanning APK AXML and native libraries...");
+            toast("Rescanning installed APKs");
         });
         rHead.addView(btnRescan);
 
-        radarThreatContainer = new LinearLayout(this);
-        radarThreatContainer.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams tcLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        tcLp.topMargin = u * 3;
-        radarCard.addView(radarThreatContainer, tcLp);
+        radarFinanceContainer = new LinearLayout(this);
+        radarFinanceContainer.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams rfLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rfLp.topMargin = u * 3;
+        radarCard.addView(radarFinanceContainer, rfLp);
+
+        PixelTextView sbHead = new PixelTextView(this, "WEB AND MEDIA SANDBOX", pal.inkMuted, pal.smallFontScale);
+        LinearLayout.LayoutParams shLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        shLp.topMargin = u * 4;
+        radarCard.addView(sbHead, shLp);
+
+        radarSandboxContainer = new LinearLayout(this);
+        radarSandboxContainer.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams rsLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rsLp.topMargin = u * 2;
+        radarCard.addView(radarSandboxContainer, rsLp);
 
         return scroll;
     }
 
     private View buildVaultTab() {
-        int u = theme.px;
+        int u = pal.px;
         ScrollView scroll = new ScrollView(this);
         scroll.setPadding(u * 4, 0, u * 4, u * 4);
 
@@ -817,135 +897,75 @@ public final class MainActivity extends Activity {
         wrap.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(wrap);
 
-        LinearLayout presetCard = new LinearLayout(this);
-        presetCard.setOrientation(LinearLayout.VERTICAL);
-        presetCard.setBackground(PixelDrawable.panel(theme));
-        presetCard.setPadding(u * 4, u * 4, u * 4, u * 4);
-        wrap.addView(presetCard);
+        LinearLayout palCard = new LinearLayout(this);
+        palCard.setOrientation(LinearLayout.VERTICAL);
+        palCard.setBackground(PixelChrome.panel(pal, true));
+        palCard.setPadding(u * 4, u * 4, u * 5, u * 5);
+        wrap.addView(palCard);
 
-        presetCard.addView(sectionTitle("BATCH PRESETS (FINANCE & THREATS)"));
-        LinearLayout pRow1 = new LinearLayout(this);
-        pRow1.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams pr1Lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        pr1Lp.topMargin = u * 3;
-        presetCard.addView(pRow1, pr1Lp);
+        palCard.addView(new PixelTextView(this, "HARDWARE PALETTE", pal.info, pal.fontScale));
 
-        PixelChipView bBank = new PixelChipView(this, theme);
-        bBank.applyState("BANK STRICT", theme.chipOffBg, theme.accentOkBg, theme.accentOk, theme.accentOk, true, false);
-        bBank.setOnClickListener(v -> applyPresetToFinanceApps(PolicyFlags.PRESET_BANKING_STRICT, "BANK STRICT"));
-        addWeightChip(pRow1, bBank, 0);
+        LinearLayout palRow1 = new LinearLayout(this);
+        palRow1.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams pl1 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        pl1.topMargin = u * 3;
+        palCard.addView(palRow1, pl1);
 
-        PixelChipView bWallet = new PixelChipView(this, theme);
-        bWallet.applyState("WALLET/ALIPAY", theme.chipOffBg, theme.accentInfoBg, theme.accentInfo, theme.accentInfo, true, false);
-        bWallet.setOnClickListener(v -> applyPresetToFinanceApps(PolicyFlags.PRESET_WALLET_ALIPAY, "WALLET/ALIPAY"));
-        addWeightChip(pRow1, bWallet, u * 2);
+        LinearLayout palRow2 = new LinearLayout(this);
+        palRow2.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams pl2 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        pl2.topMargin = u * 2;
+        palCard.addView(palRow2, pl2);
 
-        LinearLayout pRow2 = new LinearLayout(this);
-        pRow2.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams pr2Lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        pr2Lp.topMargin = u * 2;
-        presetCard.addView(pRow2, pr2Lp);
+        for (int i = 0; i < 4; i++) {
+            final int modeId = i;
+            PixelKeycapView pk = new PixelKeycapView(this, pal, false);
+            pk.setSmallText(true);
+            pk.setSwatches(PixelPalette.swatchForMode(modeId));
+            boolean sel = (pal.mode == modeId);
+            pk.applyAccent(PixelPalette.nameForMode(modeId), sel ? pal.ok : pal.outline, sel ? pal.okBg : pal.keyOffBg, sel ? pal.okLip : pal.keyOffLip, sel, false);
+            pk.setOnClickListener(v -> {
+                if (pal.mode != modeId) {
+                    uiPrefs.edit().putInt(KEY_UI_THEME, modeId).apply();
+                    recreate();
+                }
+            });
+            paletteKeys[i] = pk;
+            if (i < 2) {
+                addWeightKey(palRow1, pk, i == 0 ? 0 : u * 2);
+            } else {
+                addWeightKey(palRow2, pk, i == 2 ? 0 : u * 2);
+            }
+        }
 
-        PixelChipView bMax = new PixelChipView(this, theme);
-        bMax.applyState("AUDIT MAX", theme.chipOffBg, theme.accentWarnBg, theme.accentWarn, theme.accentWarn, true, false);
-        bMax.setOnClickListener(v -> applyPresetToFinanceApps(PolicyFlags.PRESET_AUDIT_MAX, "AUDIT MAX"));
-        addWeightChip(pRow2, bMax, 0);
+        LinearLayout prefCard = new LinearLayout(this);
+        prefCard.setOrientation(LinearLayout.VERTICAL);
+        prefCard.setBackground(PixelChrome.panel(pal, false));
+        prefCard.setPadding(u * 4, u * 4, u * 5, u * 5);
+        LinearLayout.LayoutParams prcLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        prcLp.topMargin = u * 4;
+        wrap.addView(prefCard, prcLp);
 
-        PixelChipView bClear = new PixelChipView(this, theme);
-        bClear.applyState("RESET ALL", theme.chipOffBg, theme.accentDangerBg, theme.accentDanger, theme.accentDanger, true, false);
-        bClear.setOnClickListener(v -> {
-            policyMap.clear();
-            syncPoliciesToStores();
-            rebuildAppFlagsFromMap();
-            applyFilterAndBind();
-            toast("All package policies cleared");
-        });
-        addWeightChip(pRow2, bClear, u * 2);
+        prefCard.addView(new PixelTextView(this, "CONSOLE OPTIONS", pal.info, pal.fontScale));
 
-        LinearLayout ioCard = new LinearLayout(this);
-        ioCard.setOrientation(LinearLayout.VERTICAL);
-        ioCard.setBackground(PixelDrawable.panel(theme));
-        ioCard.setPadding(u * 4, u * 4, u * 4, u * 4);
-        LinearLayout.LayoutParams ioLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        ioLp.topMargin = u * 4;
-        wrap.addView(ioCard, ioLp);
-
-        ioCard.addView(sectionTitle("JSON v2.1.0 BACKUP (COMPATIBLE v2.0)"));
-        LinearLayout ioRow1 = new LinearLayout(this);
-        ioRow1.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams ior1 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        ior1.topMargin = u * 3;
-        ioCard.addView(ioRow1, ior1);
-
-        PixelChipView btnClipExp = new PixelChipView(this, theme);
-        btnClipExp.applyState("COPY JSON", theme.chipOffBg, theme.accentOkBg, theme.accentOk, theme.accentOk, true, false);
-        btnClipExp.setOnClickListener(v -> {
-            String json = PolicyCodec.exportJson(policyMap, PolicyFlags.AZ_OFF);
-            copyTextToClipboard("IsolPolicy JSON", json);
-            toast("Exported " + policyMap.size() + " policies to clipboard");
-        });
-        addWeightChip(ioRow1, btnClipExp, 0);
-
-        PixelChipView btnClipImp = new PixelChipView(this, theme);
-        btnClipImp.applyState("PASTE JSON", theme.chipOffBg, theme.accentInfoBg, theme.accentInfo, theme.accentInfo, true, false);
-        btnClipImp.setOnClickListener(v -> importJsonFromClipboard());
-        addWeightChip(ioRow1, btnClipImp, u * 2);
-
-        LinearLayout ioRow2 = new LinearLayout(this);
-        ioRow2.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams ior2 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        ior2.topMargin = u * 2;
-        ioCard.addView(ioRow2, ior2);
-
-        PixelChipView btnFileExp = new PixelChipView(this, theme);
-        btnFileExp.applyState("SAVE .JSON", theme.chipOffBg, theme.bgCard, theme.borderOuter, theme.inkPrimary, true, false);
-        btnFileExp.setOnClickListener(v -> launchExportFilePicker());
-        addWeightChip(ioRow2, btnFileExp, 0);
-
-        PixelChipView btnFileImp = new PixelChipView(this, theme);
-        btnFileImp.applyState("LOAD .JSON", theme.chipOffBg, theme.bgCard, theme.borderOuter, theme.inkPrimary, true, false);
-        btnFileImp.setOnClickListener(v -> launchImportFilePicker());
-        addWeightChip(ioRow2, btnFileImp, u * 2);
-
-        LinearLayout uiCard = new LinearLayout(this);
-        uiCard.setOrientation(LinearLayout.VERTICAL);
-        uiCard.setBackground(PixelDrawable.panel(theme));
-        uiCard.setPadding(u * 4, u * 4, u * 4, u * 4);
-        LinearLayout.LayoutParams uiLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        uiLp.topMargin = u * 4;
-        wrap.addView(uiCard, uiLp);
-
-        uiCard.addView(sectionTitle("INSTRUMENT PREFERENCES"));
-        LinearLayout prefRow1 = new LinearLayout(this);
-        prefRow1.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout prefRow = new LinearLayout(this);
+        prefRow.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams pf1 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         pf1.topMargin = u * 3;
-        uiCard.addView(prefRow1, pf1);
+        prefCard.addView(prefRow, pf1);
 
-        btnThemeToggle = new PixelChipView(this, theme);
-        btnThemeToggle.setOnClickListener(v -> {
-            int nextMode = theme.isDark() ? PixelTheme.MODE_PAPER : PixelTheme.MODE_OBSIDIAN;
-            uiPrefs.edit().putInt(KEY_UI_THEME, nextMode).apply();
-            recreate();
-        });
-        addWeightChip(prefRow1, btnThemeToggle, 0);
-
-        btnIconToggle = new PixelChipView(this, theme);
+        btnIconToggle = new PixelKeycapView(this, pal, false);
+        btnIconToggle.setSmallText(true);
         btnIconToggle.setOnClickListener(v -> {
             pixelizeIcons = !pixelizeIcons;
             uiPrefs.edit().putBoolean(KEY_UI_PIXEL_ICON, pixelizeIcons).apply();
             adapter.setPixelizeIcons(pixelizeIcons);
-            refreshVaultPrefChips();
+            refreshVaultPrefKeys();
         });
-        addWeightChip(prefRow1, btnIconToggle, u * 2);
+        addWeightKey(prefRow, btnIconToggle, 0);
 
-        LinearLayout prefRow2 = new LinearLayout(this);
-        prefRow2.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams pf2 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        pf2.topMargin = u * 2;
-        uiCard.addView(prefRow2, pf2);
-
-        btnPollToggle = new PixelChipView(this, theme);
+        btnPollToggle = new PixelKeycapView(this, pal, false);
+        btnPollToggle.setSmallText(true);
         btnPollToggle.setOnClickListener(v -> {
             if (pollIntervalMs == 1500) {
                 pollIntervalMs = 3000;
@@ -955,151 +975,175 @@ public final class MainActivity extends Activity {
                 pollIntervalMs = 1500;
             }
             uiPrefs.edit().putInt(KEY_UI_POLL_MS, pollIntervalMs).apply();
-            refreshVaultPrefChips();
+            refreshVaultPrefKeys();
             mainHandler.removeCallbacks(pollTask);
             if (activityResumed && pollIntervalMs > 0) {
                 mainHandler.postDelayed(pollTask, pollIntervalMs);
             }
         });
-        addWeightChip(prefRow2, btnPollToggle, 0);
+        addWeightKey(prefRow, btnPollToggle, u * 2);
 
-        btnSysToggle = new PixelChipView(this, theme);
+        LinearLayout prefRow2 = new LinearLayout(this);
+        prefRow2.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams pf2 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        pf2.topMargin = u * 2;
+        prefCard.addView(prefRow2, pf2);
+
+        btnSysToggle = new PixelKeycapView(this, pal, true);
+        btnSysToggle.setSmallText(true);
         btnSysToggle.setOnClickListener(v -> {
             showSystemApps = !showSystemApps;
             uiPrefs.edit().putBoolean(KEY_UI_SHOW_SYS, showSystemApps).apply();
-            refreshVaultPrefChips();
+            refreshVaultPrefKeys();
             loadInstalledAppsAsync();
         });
-        addWeightChip(prefRow2, btnSysToggle, u * 2);
+        addWeightKey(prefRow2, btnSysToggle, 0);
+        refreshVaultPrefKeys();
 
-        refreshVaultPrefChips();
+        LinearLayout presetCard = new LinearLayout(this);
+        presetCard.setOrientation(LinearLayout.VERTICAL);
+        presetCard.setBackground(PixelChrome.panel(pal, false));
+        presetCard.setPadding(u * 4, u * 4, u * 5, u * 5);
+        LinearLayout.LayoutParams pcLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        pcLp.topMargin = u * 4;
+        wrap.addView(presetCard, pcLp);
 
-        LinearLayout recCard = new LinearLayout(this);
-        recCard.setOrientation(LinearLayout.VERTICAL);
-        recCard.setBackground(PixelDrawable.inset(theme));
-        recCard.setPadding(u * 4, u * 4, u * 4, u * 4);
-        LinearLayout.LayoutParams recLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        recLp.topMargin = u * 4;
-        wrap.addView(recCard, recLp);
+        presetCard.addView(new PixelTextView(this, "FINANCE BATCH PRESETS", pal.ok, pal.fontScale));
 
-        TextView recInfo = new TextView(this);
-        recInfo.setTypeface(theme.monoRegular);
-        recInfo.setTextSize(10f);
-        recInfo.setTextColor(theme.inkSecondary);
-        recInfo.setText("ARCHITECTURE: 100% system_server only (0 bytes injected into target apps).\n"
-                + "HMA-OSS: Keep io.github.taro902.isolationpolicy checked in Blacklist template.");
-        recCard.addView(recInfo);
+        LinearLayout bRow1 = new LinearLayout(this);
+        bRow1.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams br1 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        br1.topMargin = u * 3;
+        presetCard.addView(bRow1, br1);
+
+        PixelKeycapView bBank = new PixelKeycapView(this, pal, false);
+        bBank.setSmallText(true);
+        bBank.applyAccent("BANK STRICT", pal.ok, pal.okBg, pal.okLip, true, false);
+        bBank.setOnClickListener(v -> applyPresetToActionable(PolicyFlags.PRESET_BANKING_STRICT, "BANK STRICT"));
+        addWeightKey(bRow1, bBank, 0);
+
+        PixelKeycapView bWallet = new PixelKeycapView(this, pal, false);
+        bWallet.setSmallText(true);
+        bWallet.applyAccent("WALLET CORE", pal.info, pal.infoBg, pal.infoLip, true, false);
+        bWallet.setOnClickListener(v -> applyPresetToActionable(
+                PolicyFlags.AZ_DOWNGRADE | PolicyFlags.FLAG_DEV_COHERENT | PolicyFlags.FLAG_A11Y_COHERENT | PolicyFlags.FLAG_PKG_CHANGES,
+                "WALLET CORE"
+        ));
+        addWeightKey(bRow1, bWallet, u * 2);
+
+        LinearLayout bRow2 = new LinearLayout(this);
+        bRow2.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams br2 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        br2.topMargin = u * 2;
+        presetCard.addView(bRow2, br2);
+
+        PixelKeycapView bMax = new PixelKeycapView(this, pal, false);
+        bMax.setSmallText(true);
+        bMax.applyAccent("AUDIT MAX", pal.warn, pal.warnBg, pal.warnLip, true, false);
+        bMax.setOnClickListener(v -> applyPresetToActionable(PolicyFlags.PRESET_AUDIT_MAX, "AUDIT MAX"));
+        addWeightKey(bRow2, bMax, 0);
+
+        PixelKeycapView bClear = new PixelKeycapView(this, pal, false);
+        bClear.setSmallText(true);
+        bClear.applyAccent("RESET ALL", pal.danger, pal.dangerBg, pal.dangerLip, true, false);
+        bClear.setOnClickListener(v -> {
+            policyMap.clear();
+            syncPoliciesToStores();
+            rebuildAppFlagsAndHits();
+            applyFilterAndBind();
+            toast("All policies cleared");
+        });
+        addWeightKey(bRow2, bClear, u * 2);
+
+        LinearLayout ioCard = new LinearLayout(this);
+        ioCard.setOrientation(LinearLayout.VERTICAL);
+        ioCard.setBackground(PixelChrome.panel(pal, false));
+        ioCard.setPadding(u * 4, u * 4, u * 5, u * 5);
+        LinearLayout.LayoutParams ioLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        ioLp.topMargin = u * 4;
+        wrap.addView(ioCard, ioLp);
+
+        ioCard.addView(new PixelTextView(this, "CONFIG BACKUP JSON", pal.info, pal.fontScale));
+
+        LinearLayout ioRow1 = new LinearLayout(this);
+        ioRow1.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams ir1 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        ir1.topMargin = u * 3;
+        ioCard.addView(ioRow1, ir1);
+
+        PixelKeycapView btnClipExp = new PixelKeycapView(this, pal, false);
+        btnClipExp.setSmallText(true);
+        btnClipExp.applyAccent("COPY JSON", pal.ok, pal.okBg, pal.okLip, true, false);
+        btnClipExp.setOnClickListener(v -> {
+            String json = PolicyCodec.exportJson(policyMap, PolicyFlags.AZ_OFF);
+            copyTextToClipboard("IsolPolicy JSON", json);
+            toast("Exported " + policyMap.size() + " policies");
+        });
+        addWeightKey(ioRow1, btnClipExp, 0);
+
+        PixelKeycapView btnClipImp = new PixelKeycapView(this, pal, false);
+        btnClipImp.setSmallText(true);
+        btnClipImp.applyAccent("PASTE JSON", pal.info, pal.infoBg, pal.infoLip, true, false);
+        btnClipImp.setOnClickListener(v -> importJsonFromClipboard());
+        addWeightKey(ioRow1, btnClipImp, u * 2);
+
+        LinearLayout ioRow2 = new LinearLayout(this);
+        ioRow2.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams ir2 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        ir2.topMargin = u * 2;
+        ioCard.addView(ioRow2, ir2);
+
+        PixelKeycapView btnFileExp = new PixelKeycapView(this, pal, false);
+        btnFileExp.setSmallText(true);
+        btnFileExp.applyAccent("SAVE FILE", pal.inkSecondary, pal.keyOffBg, pal.keyOffLip, true, false);
+        btnFileExp.setOnClickListener(v -> launchExportFilePicker());
+        addWeightKey(ioRow2, btnFileExp, 0);
+
+        PixelKeycapView btnFileImp = new PixelKeycapView(this, pal, false);
+        btnFileImp.setSmallText(true);
+        btnFileImp.applyAccent("LOAD FILE", pal.inkSecondary, pal.keyOffBg, pal.keyOffLip, true, false);
+        btnFileImp.setOnClickListener(v -> launchImportFilePicker());
+        addWeightKey(ioRow2, btnFileImp, u * 2);
 
         return scroll;
     }
 
-    private LinearLayout buildDockBar() {
-        int u = theme.px;
-        LinearLayout dock = new LinearLayout(this);
-        dock.setOrientation(LinearLayout.HORIZONTAL);
-        dock.setBackgroundColor(theme.bgPanel);
-        dock.setPadding(u * 3, u * 3, u * 3, u * 3);
-
-        String[] names = {"GUARD", "SCOPE", "RADAR", "VAULT"};
-        int[][] icons = {PixelIcons.SHIELD_10, PixelIcons.SCOPE_10, PixelIcons.RADAR_10, PixelIcons.VAULT_10};
-
-        for (int i = 0; i < 4; i++) {
-            final int tabIdx = i;
-            LinearLayout btn = new LinearLayout(this);
-            btn.setOrientation(LinearLayout.VERTICAL);
-            btn.setGravity(Gravity.CENTER);
-            btn.setPadding(u * 2, u * 3, u * 2, u * 3);
-            btn.setClickable(true);
-
-            ImageView iv = new ImageView(this);
-            iv.setTag(icons[i]);
-            btn.addView(iv, new LinearLayout.LayoutParams(u * 8, u * 8));
-
-            TextView tv = new TextView(this);
-            tv.setTypeface(theme.monoBold);
-            tv.setTextSize(9.5f);
-            tv.setText(names[i]);
-            LinearLayout.LayoutParams tvLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            tvLp.topMargin = u;
-            btn.addView(tv, tvLp);
-
-            btn.setOnClickListener(v -> selectTab(tabIdx));
-
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            if (i > 0) lp.setMarginStart(u * 2);
-            dock.addView(btn, lp);
-            dockButtons[i] = btn;
-        }
-        return dock;
-    }
-
     private void selectTab(int tabIdx) {
         activeTab = tabIdx;
+        dockBar.setActiveTab(tabIdx);
         tabGuardView.setVisibility(tabIdx == TAB_GUARD ? View.VISIBLE : View.GONE);
         tabScopeView.setVisibility(tabIdx == TAB_SCOPE ? View.VISIBLE : View.GONE);
         tabRadarView.setVisibility(tabIdx == TAB_RADAR ? View.VISIBLE : View.GONE);
         tabVaultView.setVisibility(tabIdx == TAB_VAULT ? View.VISIBLE : View.GONE);
 
-        int u = theme.px;
-        for (int i = 0; i < 4; i++) {
-            boolean sel = (i == tabIdx);
-            LinearLayout btn = dockButtons[i];
-            btn.setBackground(PixelDrawable.tab(theme, sel));
-            ImageView iv = (ImageView) btn.getChildAt(0);
-            TextView tv = (TextView) btn.getChildAt(1);
-            int tint = sel ? theme.accentOk : theme.inkMuted;
-            int[] mask = (int[]) iv.getTag();
-            iv.setImageDrawable(PixelIcons.createDrawable(getResources(), mask, 10, Math.max(2, u), tint));
-            tv.setTextColor(tint);
-        }
-
         if (tabIdx == TAB_SCOPE) {
             renderScopeStream();
         } else if (tabIdx == TAB_RADAR) {
-            renderRadarThreatList();
+            renderRadarSurface();
         }
     }
 
-    private void refreshFilterChips() {
-        String[] labels = {"ALL", "THREATS", "GUARDED", "FINANCE", "SYSTEM"};
-        for (int i = 0; i < filterChips.length; i++) {
+    private void refreshFilterKeys() {
+        String[] labels = {"ALL", "FINANCE", "GUARDED", "THREATS", "SYSTEM"};
+        for (int i = 0; i < filterKeys.length; i++) {
             boolean on = (i == activeFilter);
-            if (on) {
-                filterChips[i].applyState(labels[i], theme.chipOffBg, theme.accentOkBg, theme.accentOk, theme.accentOk, true, true);
-            } else {
-                filterChips[i].applyState(labels[i], theme.chipOffBg, theme.chipOffBg, theme.borderOuter, theme.chipOffInk, false, false);
-            }
+            filterKeys[i].applyAccent(labels[i], pal.ok, pal.okBg, pal.okLip, on, true);
         }
     }
 
-    private void refreshScopeFilterChips() {
+    private void refreshScopeFilterKeys() {
         String[] names = {"ALL", "AZ", "ISO", "SET", "USB", "A11Y", "PKG", "DISP"};
-        for (int i = 0; i < scopeFilterChips.length; i++) {
+        for (int i = 0; i < scopeFilterKeys.length; i++) {
             boolean on = (i == scopePillarFilter);
-            if (on) {
-                scopeFilterChips[i].applyState(names[i], theme.chipOffBg, theme.accentInfoBg, theme.accentInfo, theme.accentInfo, true, true);
-            } else {
-                scopeFilterChips[i].applyState(names[i], theme.chipOffBg, theme.chipOffBg, theme.borderOuter, theme.chipOffInk, false, false);
-            }
+            scopeFilterKeys[i].applyAccent(names[i], pal.info, pal.infoBg, pal.infoLip, on, true);
         }
     }
 
-    private void refreshVaultPrefChips() {
-        String themeLbl = theme.isDark() ? "THEME:OBSIDIAN" : "THEME:PAPER";
-        btnThemeToggle.applyState(themeLbl, theme.chipOffBg, theme.accentFocusBg, theme.accentFocus, theme.accentFocus, true, false);
-
-        String iconLbl = pixelizeIcons ? "ICON:PIXEL-16" : "ICON:NATIVE";
-        btnIconToggle.applyState(iconLbl, theme.chipOffBg, theme.accentInfoBg, theme.accentInfo, theme.accentInfo, true, false);
-
+    private void refreshVaultPrefKeys() {
+        btnIconToggle.applyAccent(pixelizeIcons ? "ICON:PIXEL 16" : "ICON:NATIVE", pal.info, pal.infoBg, pal.infoLip, true, false);
         String pollLbl = pollIntervalMs == 0 ? "POLL:MANUAL" : ("POLL:" + (pollIntervalMs / 1000f) + "S");
-        btnPollToggle.applyState(pollLbl, theme.chipOffBg, theme.accentOkBg, theme.accentOk, theme.accentOk, true, false);
-
-        String sysLbl = showSystemApps ? "SYSTEM:UNLOCKED" : "SYSTEM:LOCKED";
-        btnSysToggle.applyState(sysLbl, theme.chipOffBg,
-                showSystemApps ? theme.accentWarnBg : theme.bgCard,
-                showSystemApps ? theme.accentWarn : theme.borderOuter,
-                showSystemApps ? theme.accentWarn : theme.inkSecondary,
-                showSystemApps, false);
+        btnPollToggle.applyAccent(pollLbl, pal.ok, pal.okBg, pal.okLip, true, false);
+        btnSysToggle.applyAccent(showSystemApps ? "SYSTEM:UNLOCKED" : "SYSTEM:LOCKED", pal.warn, pal.warnBg, pal.warnLip, showSystemApps, false);
     }
 
     private void loadInstalledAppsAsync() {
@@ -1132,6 +1176,7 @@ public final class MainActivity extends Activity {
                 ManifestRadar.ScanReport report = ManifestRadar.scanPackage(getApplicationContext(), pi);
                 CharSequence lblCs = pi.applicationInfo.loadLabel(pm);
                 String lbl = lblCs != null ? lblCs.toString() : pkg;
+                Integer hits = liveHitsMap.get(pkg);
 
                 built.add(new AppPolicyAdapter.AppItem(
                         pkg,
@@ -1140,6 +1185,7 @@ public final class MainActivity extends Activity {
                         isSys,
                         pi.applicationInfo,
                         fl,
+                        hits != null ? hits : 0,
                         report
                 ));
             }
@@ -1148,6 +1194,8 @@ public final class MainActivity extends Activity {
                 boolean aGuard = PolicyFlags.isActive(a.flags);
                 boolean bGuard = PolicyFlags.isActive(b.flags);
                 if (aGuard != bGuard) return aGuard ? -1 : 1;
+                if (a.report.financeLikely != b.report.financeLikely) return a.report.financeLikely ? -1 : 1;
+                if (a.report.isSandbox != b.report.isSandbox) return a.report.isSandbox ? 1 : -1;
                 if (a.report.threatScore != b.report.threatScore) {
                     return Integer.compare(b.report.threatScore, a.report.threatScore);
                 }
@@ -1160,19 +1208,24 @@ public final class MainActivity extends Activity {
                 syncPoliciesToStores();
                 applyFilterAndBind();
                 if (activeTab == TAB_RADAR) {
-                    renderRadarThreatList();
+                    renderRadarSurface();
                 }
             });
         });
     }
 
-    private void rebuildAppFlagsFromMap() {
+    private void rebuildAppFlagsAndHits() {
         for (int i = 0; i < allApps.size(); i++) {
             AppPolicyAdapter.AppItem item = allApps.get(i);
             Integer fl = policyMap.get(item.packageName);
-            int next = fl != null ? fl : 0;
-            if (item.flags != next) {
-                allApps.set(i, item.withFlags(next));
+            int nextFl = fl != null ? fl : 0;
+            Integer h = liveHitsMap.get(item.packageName);
+            int nextHits = h != null ? h : 0;
+            if (item.flags != nextFl || item.liveHits != nextHits) {
+                allApps.set(i, new AppPolicyAdapter.AppItem(
+                        item.packageName, item.label, item.uid, item.isSystem,
+                        item.applicationInfo, nextFl, nextHits, item.report
+                ));
             }
         }
     }
@@ -1197,12 +1250,12 @@ public final class MainActivity extends Activity {
 
     private boolean matchesFilter(AppPolicyAdapter.AppItem item) {
         switch (activeFilter) {
-            case FILTER_THREATS:
-                return item.report.isThreat();
-            case FILTER_GUARDED:
-                return PolicyFlags.isActive(item.flags);
             case FILTER_FINANCE:
                 return item.report.financeLikely;
+            case FILTER_GUARDED:
+                return PolicyFlags.isActive(item.flags);
+            case FILTER_THREATS:
+                return item.report.isThreat();
             case FILTER_SYSTEM:
                 return item.isSystem;
             default:
@@ -1226,12 +1279,16 @@ public final class MainActivity extends Activity {
         }
         syncPoliciesToStores();
         applyFilterAndBind();
+        updateHeaderFromSnapshot();
     }
 
-    private void applyRecommendedToAllThreats() {
+    private void applyRecommendedToActionable() {
         int count = 0;
         for (int i = 0; i < allApps.size(); i++) {
             AppPolicyAdapter.AppItem item = allApps.get(i);
+            if (!item.report.isActionableTarget()) {
+                continue;
+            }
             int rec = item.report.recommendedFlags;
             if (rec != 0) {
                 int merged = item.flags | rec;
@@ -1247,14 +1304,15 @@ public final class MainActivity extends Activity {
         }
         syncPoliciesToStores();
         applyFilterAndBind();
-        toast(count > 0 ? ("Guarded " + count + " threat/finance apps") : "All detected threats already guarded");
+        updateHeaderFromSnapshot();
+        toast(count > 0 ? ("Guarded " + count + " finance targets (browsers untouched)") : "All finance targets already guarded");
     }
 
-    private void applyPresetToFinanceApps(int presetFlags, String label) {
+    private void applyPresetToActionable(int presetFlags, String label) {
         int count = 0;
         for (int i = 0; i < allApps.size(); i++) {
             AppPolicyAdapter.AppItem item = allApps.get(i);
-            if (item.report.financeLikely || item.report.isThreat()) {
+            if (item.report.isActionableTarget()) {
                 policyMap.put(item.packageName, presetFlags);
                 allApps.set(i, item.withFlags(presetFlags));
                 count++;
@@ -1262,24 +1320,42 @@ public final class MainActivity extends Activity {
         }
         syncPoliciesToStores();
         applyFilterAndBind();
-        toast(label + " applied to " + count + " apps");
+        updateHeaderFromSnapshot();
+        toast(label + " applied to " + count + " finance targets");
     }
 
     private void pollTelemetryOnce() {
         runBg(() -> {
             TelemetryClient.SnapshotData snap = TelemetryClient.fetchSnapshot(getApplicationContext());
+            Map<String, Integer> hits = new HashMap<>();
+            if (snap.connected && snap.events != null) {
+                for (TelemetryClient.EventRecord ev : snap.events) {
+                    Integer cur = hits.get(ev.packageName);
+                    hits.put(ev.packageName, cur != null ? (cur + 1) : 1);
+                }
+            }
             mainHandler.post(() -> {
                 lastSnapshot = snap;
+                boolean hitsChanged = !hits.equals(liveHitsMap);
+                liveHitsMap.clear();
+                liveHitsMap.putAll(hits);
+
                 if (snap.connected) {
                     long delta = (lastTotalCount >= 0L && snap.total >= lastTotalCount)
                             ? (snap.total - lastTotalCount)
                             : 0L;
                     lastTotalCount = snap.total;
-                    scopeView.pushDelta(delta);
+                    scopeView.syncFromSnapshot(snap.events, delta);
+                    counterStrip.setCounts(snap.counts);
                 } else {
                     scopeView.pushDelta(0L);
                 }
+
                 updateHeaderFromSnapshot();
+                if (hitsChanged) {
+                    rebuildAppFlagsAndHits();
+                    applyFilterAndBind();
+                }
                 if (activeTab == TAB_SCOPE && !streamPaused) {
                     renderScopeStream();
                 }
@@ -1291,150 +1367,200 @@ public final class MainActivity extends Activity {
         TelemetryClient.SnapshotData s = lastSnapshot;
         if (s.connected) {
             int okHooks = TelemetryClient.countHealthyHooks(s.healthMask);
-            tvStatusBanner.setTextColor(okHooks == 7 ? theme.accentOk : theme.accentWarn);
-            tvStatusBanner.setText("ACTIVE | HOOKS " + okHooks + "/7 | GUARD:" + policyMap.size() + " | GRAPH:" + s.graphSize);
-            tvPillarStats.setText("AZ:" + s.counts[1]
-                    + " ISO:" + s.counts[2]
-                    + " SET:" + s.counts[3]
-                    + " USB:" + s.counts[4]
-                    + " A11Y:" + s.counts[5]
-                    + " PKG:" + s.counts[6]
-                    + " DISP:" + s.counts[7]);
-        } else if (sBoundService != null) {
-            tvStatusBanner.setTextColor(theme.accentWarn);
-            tvStatusBanner.setText("SERVICE BOUND (REBOOT NEEDED FOR SYSTEM HOOKS)");
-            tvPillarStats.setText("GUARDED:" + policyMap.size() + " | FRAMEWORK:" + safeFwName());
-        } else {
-            tvStatusBanner.setTextColor(theme.accentDanger);
-            tvStatusBanner.setText("MODULE INACTIVE // ENABLE IN LSPOSED (SCOPE: SYSTEM)");
-            tvPillarStats.setText("GUARDED:" + policyMap.size() + " | LOCAL CONFIG ONLY");
-        }
-    }
+            int stColor = okHooks == 7 ? pal.ok : pal.warn;
+            tvTopApiStatus.setText("API " + s.apiVersion);
+            tvTopApiStatus.setTextColor(stColor);
+            tvTopApiStatus.setLed(true, ledPhase ? stColor : pal.info, pal.ledSpec);
 
-    private String safeFwName() {
-        XposedService svc = sBoundService;
-        if (svc == null) return "-";
-        try {
-            return svc.getFrameworkName() + " API " + svc.getApiVersion();
-        } catch (Throwable t) {
-            return "LSPosed";
+            tvDeckState.setText("ACTIVE  " + okHooks + "/7 HOOKS");
+            tvDeckState.setTextColor(stColor);
+            tvDeckState.setLed(true, stColor, pal.ledSpec);
+            tvDeckCounts.setText(policyMap.size() + " GUARDED   " + s.graphSize + " GRAPH   " + s.total + " TOTAL");
+        } else if (sBoundService != null) {
+            tvTopApiStatus.setText("REBOOT");
+            tvTopApiStatus.setTextColor(pal.warn);
+            tvTopApiStatus.setLed(true, pal.warn, pal.ledSpec);
+
+            tvDeckState.setText("SERVICE BOUND");
+            tvDeckState.setTextColor(pal.warn);
+            tvDeckState.setLed(true, pal.warn, pal.ledSpec);
+            tvDeckCounts.setText(policyMap.size() + " GUARDED   REBOOT REQUIRED");
+        } else {
+            tvTopApiStatus.setText("OFFLINE");
+            tvTopApiStatus.setTextColor(pal.danger);
+            tvTopApiStatus.setLed(true, pal.danger, pal.ledSpec);
+
+            tvDeckState.setText("MODULE INACTIVE");
+            tvDeckState.setTextColor(pal.danger);
+            tvDeckState.setLed(true, pal.danger, pal.ledSpec);
+            tvDeckCounts.setText("ENABLE SYSTEM SCOPE IN LSPOSED");
         }
     }
 
     private void renderScopeStream() {
         TelemetryClient.SnapshotData s = lastSnapshot;
+        String[] names = {"AZ", "ISO", "SET", "USB", "A11Y", "PKG", "DISP"};
+        for (int i = 0; i < 7; i++) {
+            int st = s.connected ? TelemetryClient.decodeHookState(s.healthMask, i) : 0;
+            String code = st == 1 ? "OK" : (st == 2 ? "FB" : (st == 3 ? "ER" : "--"));
+            int col = st == 1 ? pal.ok : (st == 2 ? pal.warn : (st == 3 ? pal.danger : pal.inkMuted));
+            int led = st == 1 ? pal.ok : (st == 2 ? pal.warn : (st == 3 ? pal.danger : pal.ledOff));
+            hookTiles[i].setText(names[i] + " " + code);
+            hookTiles[i].setTextColor(col);
+            hookTiles[i].setLed(true, led, pal.ledSpec);
+        }
+
+        streamRowsContainer.removeAllViews();
+
         if (!s.connected) {
-            tvScopeHeader.setText("HOOK HEALTH MATRIX // IPC OFFLINE");
-            tvHookMatrix.setText("Activate module in LSPosed Vector (scope: System Framework) and reboot.");
-            tvStreamLog.setText("No live connection to system_server Zero-Oracle IPC gate.");
+            tvScopeUptime.setText("IPC OFFLINE");
+            tvScopeUptime.setTextColor(pal.danger);
+            addStreamLine("Activate IsolPolicy in LSPosed (System Framework) and reboot.", pal.inkMuted, false);
+            lastCopiedLog = "";
             return;
         }
 
         long sec = s.uptimeMs / 1000L;
-        tvScopeHeader.setText(s.frameworkName + " API " + s.apiVersion
-                + " | UP:" + formatUptime(sec)
-                + " | TOT:" + s.total
-                + " | GRAPH:" + s.graphSize);
+        tvScopeUptime.setText("UP " + formatUptime(sec) + "   TOT " + s.total + "   GRAPH " + s.graphSize);
+        tvScopeUptime.setTextColor(pal.info);
 
-        String[] names = {"AZ", "ISO", "SET", "USB", "A11Y", "PKG", "DISP"};
-        StringBuilder hm = new StringBuilder();
-        for (int i = 0; i < 7; i++) {
-            int st = TelemetryClient.decodeHookState(s.healthMask, i);
-            String code = st == 1 ? "OK" : (st == 2 ? "FB" : (st == 3 ? "ER" : "--"));
-            if (i > 0) hm.append(' ');
-            hm.append(names[i]).append('[').append(code).append(']');
-        }
-        tvHookMatrix.setText(hm.toString());
-
-        StringBuilder sb = new StringBuilder();
+        StringBuilder copyBuf = new StringBuilder();
         SimpleDateFormat fmt = new SimpleDateFormat("HH:mm:ss", Locale.US);
         int shown = 0;
         for (TelemetryClient.EventRecord ev : s.events) {
             if (scopePillarFilter != 0 && ev.pillar != scopePillarFilter) {
                 continue;
             }
-            sb.append(fmt.format(new Date(ev.timestampMs)))
-                    .append(" | ")
-                    .append(PolicyFlags.pillarName(ev.pillar))
-                    .append(" | ")
-                    .append(shortenPkg(ev.packageName))
-                    .append(" | ")
-                    .append(PolicyFlags.vectorName(ev.vector))
-                    .append(" -> ")
-                    .append(PolicyFlags.actionName(ev.action))
-                    .append('\n');
+            String line = fmt.format(new Date(ev.timestampMs))
+                    + "  " + padRight(PolicyFlags.pillarName(ev.pillar), 4)
+                    + "  " + padRight(shortenPkg(ev.packageName), 18)
+                    + "  " + PolicyFlags.vectorName(ev.vector)
+                    + " -> " + PolicyFlags.actionName(ev.action);
+            copyBuf.append(line).append('\n');
+            addStreamLine(line, colorForPillar(ev.pillar), (shown & 1) == 1);
             shown++;
         }
+        lastCopiedLog = copyBuf.toString().trim();
         if (shown == 0) {
-            tvStreamLog.setText("Ring buffer empty for selected filter. Launch a guarded app to observe live interceptions.");
-        } else {
-            tvStreamLog.setText(sb.toString().trim());
+            addStreamLine("No events in ring buffer for this filter. Launch a guarded app to observe live telemetry.", pal.inkMuted, false);
         }
     }
 
-    private void renderRadarThreatList() {
-        radarThreatContainer.removeAllViews();
-        int u = theme.px;
-        int azCount = 0;
-        int isoCount = 0;
-        int sdkCount = 0;
-        int shown = 0;
+    private void addStreamLine(String text, int color, boolean zebra) {
+        int u = pal.px;
+        TextView tv = new TextView(this);
+        tv.setTypeface(pal.monoRegular);
+        tv.setTextSize(10f);
+        tv.setTextColor(color);
+        tv.setFontFeatureSettings("tnum");
+        tv.setText(text);
+        tv.setPadding(u * 2, u * 2, u * 2, u * 2);
+        if (zebra) {
+            tv.setBackgroundColor(pal.bgPanel);
+        }
+        streamRowsContainer.addView(tv, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+    }
+
+    private int colorForPillar(int pillar) {
+        switch (pillar) {
+            case PolicyFlags.PILLAR_APP_ZYGOTE:
+            case PolicyFlags.PILLAR_SETTINGS:
+                return pal.ok;
+            case PolicyFlags.PILLAR_USB:
+            case PolicyFlags.PILLAR_PKG_CHANGE:
+                return pal.warn;
+            case PolicyFlags.PILLAR_A11Y:
+                return pal.focus;
+            default:
+                return pal.info;
+        }
+    }
+
+    private void renderRadarSurface() {
+        radarFinanceContainer.removeAllViews();
+        radarSandboxContainer.removeAllViews();
+        int u = pal.px;
+        int finCount = 0;
+        int sbCount = 0;
 
         for (AppPolicyAdapter.AppItem item : allApps) {
-            if (!item.report.isThreat() && !item.report.financeLikely) {
-                continue;
+            if (item.report.isActionableTarget()) {
+                finCount++;
+                addRadarRow(radarFinanceContainer, item, false, u);
+            } else if (item.report.isSandbox && (item.report.usesAppZygote || !item.report.isolatedServices.isEmpty())) {
+                sbCount++;
+                addRadarRow(radarSandboxContainer, item, true, u);
             }
-            if (item.report.usesAppZygote) azCount++;
-            if (!item.report.isolatedServices.isEmpty()) isoCount++;
-            if (!item.report.antifraudSdks.isEmpty()) sdkCount++;
-
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.VERTICAL);
-            row.setBackground(PixelDrawable.card(theme, PolicyFlags.isActive(item.flags)));
-            row.setPadding(u * 3, u * 3, u * 3, u * 3);
-            row.setOnClickListener(v -> AppInspectorDialog.show(this, theme, item, lastSnapshot, this::updatePackageFlags));
-
-            TextView t1 = new TextView(this);
-            t1.setTypeface(theme.monoBold);
-            t1.setTextSize(11f);
-            t1.setTextColor(PolicyFlags.isActive(item.flags) ? theme.accentOk : theme.accentDanger);
-            t1.setText(item.label + " [" + item.report.threatScore + "/100] "
-                    + (PolicyFlags.isActive(item.flags) ? "GUARDED" : "EXPOSED"));
-            row.addView(t1);
-
-            TextView t2 = new TextView(this);
-            t2.setTypeface(theme.monoRegular);
-            t2.setTextSize(9.5f);
-            t2.setTextColor(theme.inkSecondary);
-            StringBuilder detail = new StringBuilder(item.packageName);
-            if (item.report.usesAppZygote) detail.append(" | AZ");
-            if (!item.report.isolatedServices.isEmpty()) detail.append(" | ISO:").append(item.report.isolatedServices.size());
-            if (!item.report.antifraudSdks.isEmpty()) detail.append(" | ").append(String.join(",", item.report.antifraudSdks));
-            t2.setText(detail.toString());
-            row.addView(t2);
-
-            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-            );
-            rlp.bottomMargin = u * 2;
-            radarThreatContainer.addView(row, rlp);
-            shown++;
         }
 
-        tvRadarSummary.setText("SURFACE: " + shown + " TARGETS (AZ:" + azCount + " ISO:" + isoCount + " SDK:" + sdkCount + ")");
-        if (shown == 0) {
+        tvRadarHeader.setText("TARGETS " + finCount + "  SANDBOX " + sbCount);
+        if (finCount == 0) {
             TextView empty = new TextView(this);
-            empty.setTypeface(theme.monoRegular);
-            empty.setTextSize(10.5f);
-            empty.setTextColor(theme.inkMuted);
-            empty.setText("No high-risk AppZygote / Isolated / Antifraud packages detected.");
-            radarThreatContainer.addView(empty);
+            empty.setTypeface(pal.monoRegular);
+            empty.setTextSize(10f);
+            empty.setTextColor(pal.inkMuted);
+            empty.setText("No finance or antifraud packages detected.");
+            radarFinanceContainer.addView(empty);
         }
+        if (sbCount == 0) {
+            TextView empty = new TextView(this);
+            empty.setTypeface(pal.monoRegular);
+            empty.setTextSize(10f);
+            empty.setTextColor(pal.inkMuted);
+            empty.setText("No browser or media sandbox packages detected.");
+            radarSandboxContainer.addView(empty);
+        }
+    }
+
+    private void addRadarRow(LinearLayout container, AppPolicyAdapter.AppItem item, boolean isSandbox, int u) {
+        boolean guarded = PolicyFlags.isActive(item.flags);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setBackground(PixelChrome.card(pal, guarded));
+        row.setPadding(guarded ? u * 7 : u * 3, u * 3, u * 4, u * 4);
+        row.setOnClickListener(v -> AppInspectorDialog.show(this, pal, item, lastSnapshot, this::updatePackageFlags));
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(head);
+
+        TextView t1 = new TextView(this);
+        t1.setTypeface(pal.monoBold);
+        t1.setTextSize(11.5f);
+        t1.setTextColor(pal.inkPrimary);
+        t1.setText(item.label);
+        head.addView(t1, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        String stateLbl = guarded ? "GUARDED" : (isSandbox ? "SAFE OFF" : "EXPOSED");
+        int stateCol = guarded ? pal.ok : (isSandbox ? pal.inkMuted : pal.danger);
+        PixelTextView badge = new PixelTextView(this, stateLbl, stateCol, pal.smallFontScale);
+        badge.setLed(true, stateCol, pal.ledSpec);
+        head.addView(badge);
+
+        TextView t2 = new TextView(this);
+        t2.setTypeface(pal.monoRegular);
+        t2.setTextSize(9.5f);
+        t2.setTextColor(pal.inkSecondary);
+        StringBuilder detail = new StringBuilder(item.packageName);
+        if (item.report.usesAppZygote) detail.append("   AZ");
+        if (!item.report.isolatedServices.isEmpty()) detail.append("   ISO:").append(item.report.isolatedServices.size());
+        if (!item.report.antifraudSdks.isEmpty()) detail.append("   ").append(String.join(" ", item.report.antifraudSdks));
+        t2.setText(detail.toString());
+        row.addView(t2);
+
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rlp.bottomMargin = u * 2;
+        container.addView(row, rlp);
     }
 
     private void runSelfDiagnosticAsync() {
-        tvDiagOutput.setText("Running coherence probes...");
+        diagRowsContainer.removeAllViews();
+        addDiagRow("PROBE", "Checking service, Zero-Oracle IPC, hooks, and host state...", pal.info, pal.info);
+
         final boolean svcOk = sBoundService != null;
         int api = 0;
         String fw = "NONE";
@@ -1450,16 +1576,48 @@ public final class MainActivity extends Activity {
 
         runBg(() -> {
             TelemetryClient.DiagnosticResult d = TelemetryClient.runSelfDiagnostic(getApplicationContext(), svcOk, fApi, fFw);
-            StringBuilder sb = new StringBuilder();
-            sb.append("XposedService : ").append(d.serviceBound ? ("OK (" + d.serviceFw + " API " + d.serviceApi + ")") : "UNBOUND").append('\n');
-            sb.append("ZeroOracleIPC : ").append(d.ipcAlive ? ("AUTHENTICATED (v" + d.remoteVer + ")") : "NO RESPONSE").append('\n');
-            sb.append("Active Hooks  : ").append(TelemetryClient.countHealthyHooks(d.healthMask)).append("/7\n");
-            sb.append("Host DevOpts  : ").append(d.hostDevOn ? "ON (SPOOFED FOR GUARDED APPS)" : "OFF").append('\n');
-            sb.append("Host ADB      : ").append(d.hostAdbOn ? "ON (SPOOFED + USB_STATE SANITIZED)" : "OFF").append('\n');
-            sb.append("Host A11y     : ").append(d.hostA11yOn ? "ON (ADDCLIENT + SETTINGS HIDDEN)" : "OFF").append('\n');
-            sb.append("Self AppId    : ").append(Process.myUid() % 100000);
-            mainHandler.post(() -> tvDiagOutput.setText(sb.toString()));
+            mainHandler.post(() -> {
+                diagRowsContainer.removeAllViews();
+                int okCount = TelemetryClient.countHealthyHooks(d.healthMask);
+                addDiagRow("SERVICE", d.serviceBound ? (d.serviceFw + " API " + d.serviceApi) : "UNBOUND",
+                        d.serviceBound ? pal.ok : pal.danger, d.serviceBound ? pal.ok : pal.danger);
+                addDiagRow("IPC GATE", d.ipcAlive ? ("AUTHENTICATED v" + d.remoteVer) : "NO RESPONSE",
+                        d.ipcAlive ? pal.ok : pal.danger, d.ipcAlive ? pal.ok : pal.danger);
+                addDiagRow("HOOKS", okCount + " OF 7 ATTACHED",
+                        okCount == 7 ? pal.ok : pal.warn, okCount == 7 ? pal.ok : pal.warn);
+                addDiagRow("DEV OPTS", d.hostDevOn ? "HOST ON (SPOOFED FOR TARGETS)" : "HOST OFF",
+                        d.hostDevOn ? pal.warn : pal.ok, d.hostDevOn ? pal.warn : pal.ok);
+                addDiagRow("HOST ADB", d.hostAdbOn ? "HOST ON (USB SANITIZED)" : "HOST OFF",
+                        d.hostAdbOn ? pal.warn : pal.ok, d.hostAdbOn ? pal.warn : pal.ok);
+                addDiagRow("HOST A11Y", d.hostA11yOn ? "HOST ON (HIDDEN FROM TARGETS)" : "HOST OFF",
+                        d.hostA11yOn ? pal.warn : pal.ok, d.hostA11yOn ? pal.warn : pal.ok);
+                addDiagRow("SELF UID", "APPID " + (Process.myUid() % 100000), pal.info, pal.info);
+            });
         });
+    }
+
+    private void addDiagRow(String key, String value, int valueColor, int ledColor) {
+        int u = pal.px;
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, u, 0, u);
+
+        PixelTextView kView = new PixelTextView(this, padRight(key, 9), pal.inkSecondary, pal.smallFontScale);
+        kView.setLed(true, ledColor, pal.ledSpec);
+        row.addView(kView);
+
+        TextView vView = new TextView(this);
+        vView.setTypeface(pal.monoBold);
+        vView.setTextSize(10f);
+        vView.setTextColor(valueColor);
+        vView.setFontFeatureSettings("tnum");
+        vView.setText(value);
+        LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        vlp.setMarginStart(u * 2);
+        row.addView(vView, vlp);
+
+        diagRowsContainer.addView(row);
     }
 
     private void importJsonFromClipboard() {
@@ -1475,14 +1633,15 @@ public final class MainActivity extends Activity {
     private void applyImportedJson(String raw) {
         PolicyCodec.ImportResult res = PolicyCodec.importJson(raw);
         if (!res.valid) {
-            toast("Invalid IsolPolicy JSON format");
+            toast("Invalid IsolPolicy JSON");
             return;
         }
         policyMap.clear();
         policyMap.putAll(res.policies);
         syncPoliciesToStores();
-        rebuildAppFlagsFromMap();
+        rebuildAppFlagsAndHits();
         applyFilterAndBind();
+        updateHeaderFromSnapshot();
         toast("Imported " + res.policies.size() + " package policies");
     }
 
@@ -1490,7 +1649,7 @@ public final class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "isolpolicy-v2.1.0-backup.json");
+        intent.putExtra(Intent.EXTRA_TITLE, "isolpolicy-v2.1.1-backup.json");
         try {
             startActivityForResult(intent, REQ_EXPORT_JSON);
         } catch (Throwable t) {
@@ -1521,7 +1680,7 @@ public final class MainActivity extends Activity {
                 if (os != null) {
                     String json = PolicyCodec.exportJson(policyMap, PolicyFlags.AZ_OFF);
                     os.write(json.getBytes(StandardCharsets.UTF_8));
-                    toast("Saved " + policyMap.size() + " policies to file");
+                    toast("Saved " + policyMap.size() + " policies");
                 }
             } catch (Throwable t) {
                 toast("Export failed");
@@ -1543,19 +1702,10 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private TextView sectionTitle(String text) {
-        TextView tv = new TextView(this);
-        tv.setTypeface(theme.monoBold);
-        tv.setTextSize(11f);
-        tv.setTextColor(theme.accentInfo);
-        tv.setText(text);
-        return tv;
-    }
-
-    private static void addWeightChip(LinearLayout row, PixelChipView chip, int startMargin) {
+    private static void addWeightKey(LinearLayout row, PixelKeycapView key, int startMargin) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         lp.setMarginStart(startMargin);
-        row.addView(chip, lp);
+        row.addView(key, lp);
     }
 
     private void copyTextToClipboard(String label, String text) {
@@ -1569,14 +1719,28 @@ public final class MainActivity extends Activity {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
     }
 
+    private static String padRight(String s, int width) {
+        if (s == null) s = "";
+        if (s.length() >= width) return s;
+        StringBuilder sb = new StringBuilder(width);
+        sb.append(s);
+        while (sb.length() < width) {
+            sb.append(' ');
+        }
+        return sb.toString();
+    }
+
     private static String shortenPkg(String pkg) {
         if (pkg == null) return "-";
-        if (pkg.length() <= 24) return pkg;
+        if (pkg.length() <= 18) return pkg;
         int dot = pkg.lastIndexOf('.');
         if (dot > 0 && dot < pkg.length() - 1) {
-            return ".." + pkg.substring(Math.max(0, dot - 6));
+            String tail = pkg.substring(dot + 1);
+            if (tail.length() <= 16) {
+                return ".." + tail;
+            }
         }
-        return pkg.substring(0, 22) + "..";
+        return pkg.substring(0, 16) + "..";
     }
 
     private static String formatUptime(long totalSec) {

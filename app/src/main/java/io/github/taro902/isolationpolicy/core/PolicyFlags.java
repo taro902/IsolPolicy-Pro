@@ -81,7 +81,7 @@ public final class PolicyFlags {
     public static final String IPC_CMD_PING = "PING";
 
     public static final String MODULE_PACKAGE = "io.github.taro902.isolationpolicy";
-    public static final String VERSION_NAME = "2.1.0";
+    public static final String VERSION_NAME = "2.1.1";
 
     private PolicyFlags() {
     }
