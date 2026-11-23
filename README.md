@@ -1,34 +1,30 @@
 <div align="center">
 
-<h1>ISOLPOLICY</h1>
+<h1>IsolPolicy</h1>
 
-<p><code>SPEC-ISOL-210</code> &middot; <strong>7-Pillar Server-Side Process Isolation, Hardware-Atomic Reverse IdentityGraph &amp; Cross-API Coherent Binder Shield</strong></p>
+<p><strong>Server-Side AppZygote Isolation, Selective Isolated-Service Folding, and Cross-API Environment Coherence for Android 10-16</strong></p>
 
 <p>
-  <img src="https://img.shields.io/badge/release-v2.1.0-4ADE80?style=flat-square&amp;labelColor=0D0F12" alt="Release v2.1.0" />
-  <img src="https://img.shields.io/badge/libxposed-API%20102-38BDF8?style=flat-square&amp;labelColor=0D0F12" alt="libxposed API 102" />
-  <img src="https://img.shields.io/badge/android-10%20--%2016-94A3B8?style=flat-square&amp;labelColor=0D0F12" alt="Android 10 to 16" />
-  <img src="https://img.shields.io/badge/boundary-system__server%20only-A78BFA?style=flat-square&amp;labelColor=0D0F12" alt="system_server only" />
-  <img src="https://img.shields.io/badge/target%20injection-0%20bytes-4ADE80?style=flat-square&amp;labelColor=0D0F12" alt="0 bytes target injection" />
-  <img src="https://img.shields.io/badge/IdentityGraph-2048%20B%20atomic-38BDF8?style=flat-square&amp;labelColor=0D0F12" alt="2048 B atomic IdentityGraph" />
-  <img src="https://img.shields.io/badge/release%20APK-419%20KB-FBBF24?style=flat-square&amp;labelColor=0D0F12" alt="Release APK 419 KB" />
-  <img src="https://img.shields.io/badge/license-Apache--2.0-94A3B8?style=flat-square&amp;labelColor=0D0F12" alt="Apache 2.0" />
+  <img src="https://img.shields.io/badge/version-2.1.1-4ADE80?style=flat-square&amp;labelColor=0B0E14" alt="Version 2.1.1" />
+  <img src="https://img.shields.io/badge/language-Pure%20Java%2017-F5B742?style=flat-square&amp;labelColor=0B0E14" alt="Pure Java 17" />
+  <img src="https://img.shields.io/badge/libxposed-API%20102-4CC2FF?style=flat-square&amp;labelColor=0B0E14" alt="libxposed API 102" />
+  <img src="https://img.shields.io/badge/scope-system__server%20only-A78BFA?style=flat-square&amp;labelColor=0B0E14" alt="system_server only" />
+  <img src="https://img.shields.io/badge/target%20injection-0%20bytes-4ADE80?style=flat-square&amp;labelColor=0B0E14" alt="0 bytes target injection" />
+  <img src="https://img.shields.io/badge/classes-31%20Java%20files-94A6BF?style=flat-square&amp;labelColor=0B0E14" alt="31 Java files" />
+  <img src="https://img.shields.io/badge/license-Apache--2.0-94A6BF?style=flat-square&amp;labelColor=0B0E14" alt="Apache 2.0" />
 </p>
 
 <p>
-  <a href="#1-threat-surface-and-contradiction-model">01 Threat Model</a> &middot;
-  <a href="#2-four-plane-isolation-architecture">02 Architecture</a> &middot;
-  <a href="#3-hardware-register-and-bitfield-specifications">03 Bitfields</a> &middot;
-  <a href="#4-formal-mathematical-specification">04 Math Proofs</a> &middot;
-  <a href="#5-seven-pillar-server-side-engine">05 Seven Pillars</a> &middot;
-  <a href="#6-static-threat-radar-and-elf-signatures">06 Radar &amp; ELF</a> &middot;
-  <a href="#7-dual-checkpoint-lifecycle-and-zero-oracle-ipc">07 Lifecycle &amp; IPC</a> &middot;
-  <a href="#8-polyglot-systems-internals">08 Polyglot Internals</a> &middot;
-  <a href="#9-procedural-canvas-console-architecture">09 Console Engine</a> &middot;
-  <a href="#10-modular-dependency-map">10 Codebase</a> &middot;
-  <a href="#11-failure-mode-and-effects-analysis">11 FMEA</a> &middot;
-  <a href="#12-hardware-telemetry-and-ecosystem-synergy">12 Telemetry</a> &middot;
-  <a href="#13-build-verification-and-license">13 Verification</a>
+  <a href="#1-design-invariants">Invariants</a> &middot;
+  <a href="#2-system-topology">Topology</a> &middot;
+  <a href="#3-bitfields-and-formal-model">Bitfields</a> &middot;
+  <a href="#4-seven-pillar-java-engine">7 Pillars</a> &middot;
+  <a href="#5-binder-interception-flow">Interception Flow</a> &middot;
+  <a href="#6-lifecycle-and-zero-oracle-ipc">Lifecycle &amp; IPC</a> &middot;
+  <a href="#7-procedural-canvas-console">Pixel Console</a> &middot;
+  <a href="#8-project-configuration-and-tree">Codebase</a> &middot;
+  <a href="#9-failure-mode-analysis">FMEA</a> &middot;
+  <a href="#10-verification-and-license">Verification</a>
 </p>
 
 </div>
@@ -36,147 +32,112 @@
 <table>
   <thead>
     <tr>
-      <th>Execution Plane</th>
+      <th>Execution Boundary</th>
       <th>Memory &amp; Storage Budget</th>
-      <th>Concurrency &amp; Complexity</th>
-      <th>Stealth Invariant</th>
+      <th>Concurrency Model</th>
+      <th>Live Verification (Android 14 / 4.19)</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td><code>system_server</code> (<code>UID 1000</code>)<br/><code>scope: system</code><br/><code>autoHotReload=false</code></td>
-      <td><code>&lt; 300 KB</code> resident RAM<br/><code>2048 B</code> IdentityGraph (32 L1 lines)<br/><code>0 B/s</code> eMMC disk writes</td>
-      <td><code>O(1)</code> lock-free UID lookup<br/>0 <code>PackageManager</code> locks<br/>Wait-free 64-slot Seqlock</td>
-      <td><code>0 bytes</code> injected in target apps<br/>Zero-Oracle IPC Gate<br/>Cross-API state coherence</td>
+      <td><code>&lt; 300 KB</code> in <code>system_server</code><br/><code>2048 B</code> <code>IdentityGraph</code><br/><code>0 B/s</code> server disk I/O</td>
+      <td>Lock-free <code>AtomicReference</code><br/>0 <code>PackageManager</code> locks<br/>Wait-free 64-slot Seqlock</td>
+      <td><code>7/7</code> active hooks<br/><code>ZeroOracleIPC</code> authenticated<br/><code>0 bytes</code> injected into target apps</td>
     </tr>
   </tbody>
 </table>
 
 > [!IMPORTANT]
-> **Zero Target Process Footprint:** IsolPolicy v2.1.0 executes 100% inside `system_server` (`UID 1000`). Zero DEX classes, zero native `.so` hooks, zero ART method-table mutations, and zero foreign pages are injected into banking, e-wallet, or forensic detector processes.
+> **Pure Java, Server-Side Only:** IsolPolicy v2.1.1 is written entirely in Java 17 on top of `io.github.libxposed:api:102.0.0` and `service:102.0.0`. Every hook executes exclusively inside `system_server`. Non-`system_server` processes call `detach()` immediately in `onModuleLoaded()`, leaving target application processes unmodified.
 
-## 1. Threat Surface and Contradiction Model
+## 1. Design Invariants
 
-Financial anti-tamper engines (Alipay `APSecuritySDK`, Promon SHIELD, V-Key `vGuard`, AppSealing, ThreatMetrix, DexProtector) and runtime integrity auditors bypass conventional hiding via five structural vectors:
+Financial applications and runtime audit tools on Android 10-16 inspect environment integrity through multiple independent Binder services. On non-GKI kernels lacking kernel-level mount hiding (such as Linux `4.19` without SUSFS), four specific gaps break conventional hiding:
 
-1. **AppZygote Mount-Namespace Escape (`UID 90000-98999`):** On non-GKI kernels without kernel-level mount filtering (such as Linux `4.19` without SUSFS), Zygisk userspace unmount sanitizes only the primary `untrusted_app` process (`UID 10xxx`). Spawning an `AppZygote` service (`FLAG_USE_APP_ZYGOTE = 0x8`) forks from a Zygote context carrying an uncleaned mount table directly into `/proc/self/mountinfo`.
-2. **Non-AppZygote Isolated Helper Escape (`UID 99000-99999`):** Internal helper services declared with `android:isolatedProcess="true"` and `android:externalService="false"` (`FLAG_ISOLATED_PROCESS = 0x2`) bypass both AppZygote interception and primary-process unmount, exposing module binaries mounted under `/system/bin/`.
-3. **Cross-API Environment Contradiction:** Returning `"0"` for `Settings.Global.adb_enabled` inside `SettingsProvider.call()` alone contradicts `SettingsProvider.query()` (SQLite cursor bypass), sticky broadcast `android.hardware.usb.action.USB_STATE` (`adb = true`), and `UsbService.getCurrentFunctions()` (`FUNCTION_ADB = 1L`). Likewise, spoofing `Settings.Secure.accessibility_enabled` fails while `AccessibilityManagerService.addClient()` returns the live 64-bit `IntPair` bitmask (`STATE_FLAG_ACCESSIBILITY_ENABLED = 0x1`) or pushes live updates over `IAccessibilityManagerClient.setState()`.
-4. **Global Cache Poisoning & `LoadedApk` Attachment Races:** Returning AOSP `_track_generation` keys inside spoofed `SettingsProvider` bundles corrupts shared `MemoryIntArray` caches globally. Meanwhile, `SettingsProvider.apk` loads into `system_server` through `LoadedApk` after `onSystemServerStarting`, silently dropping single-callback hooks unless attached idempotently across both `onPackageLoaded` and `onPackageReady`.
-5. **Telemetry IPC Oracles & Post-Boot Package Deltas:** Custom IPC hooks on system providers expose detection oracles unless unauthorized callers fall straight through to stock `chain.proceed()`. In parallel, `PackageManager.getChangedPackages()` exposes post-boot package installations outside standard app-list hiding.
+1. **AppZygote & Isolated Mount-Namespace Escape:** Userspace Zygisk unmount tools clean the primary application process (`UID 10xxx`). Services declared with `android:useAppZygote="true"` (`UID 90000-98999`) or internal `android:isolatedProcess="true"` (`UID 99000-99999`) fork outside that unmount list and can inspect raw mounts.
+2. **Cross-API Contradictions:** Returning `"0"` for `Settings.Global.adb_enabled` in `SettingsProvider.call()` alone leaves conflicting values in direct `SettingsProvider.query()` cursors, sticky `android.hardware.usb.action.USB_STATE` broadcasts (`adb=true`), and `UsbService.getCurrentFunctions()`. Similarly, spoofing `Settings.Secure.accessibility_enabled` fails if `AccessibilityManagerService.addClient()` still returns active accessibility bits in its 64-bit `IntPair` return value or pushes live updates through `IAccessibilityManagerClient.setState()`.
+3. **Cache Poisoning & `SettingsProvider` Load Order:** Returning AOSP `_track_generation` keys in spoofed `SettingsProvider` bundles contaminates shared `MemoryIntArray` caches across processes. In addition, `SettingsProvider.apk` loads into `system_server` after `onSystemServerStarting()`, requiring idempotent dual-checkpoint attachment across `onPackageLoaded()` and `onPackageReady()`.
+4. **Telemetry Oracles & Post-Boot Package Deltas:** Custom IPC endpoints on system providers become detectable if unauthorized callers receive non-stock errors, and `PackageManager.getChangedPackages()` exposes post-boot installs outside standard package-list filtering.
 
-### Evolutionary Architecture Matrix (`v1.1` vs `v2.0` vs `v2.1.0`)
+### Version Evolution (`v1.1` -> `v2.0` -> `v2.1.1`)
 
 <table>
   <thead>
     <tr>
-      <th>Subsystem Dimension</th>
+      <th>Component</th>
       <th>Upstream v1.1 (API 82)</th>
       <th>IsolPolicy v2.0 (API 102)</th>
-      <th>IsolPolicy v2.1.0 (API 102)</th>
+      <th>IsolPolicy v2.1.1 (API 102)</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td><strong>Framework Contract</strong></td>
-      <td>Legacy Xposed API 82</td>
-      <td>Pure <code>libxposed:102.0.0</code></td>
-      <td>Pure <code>libxposed:102.0.0</code> (<code>autoHotReload=false</code>)</td>
+      <td><strong>Codebase</strong></td>
+      <td>Legacy single-file hook</td>
+      <td>Monolithic <code>BindHook</code></td>
+      <td>31 modular Java classes across 5 acyclic packages</td>
     </tr>
     <tr>
-      <td><strong>AppZygote Interception</strong></td>
+      <td><strong>AppZygote &amp; Isolated</strong></td>
       <td>Hard abort (SELinux timeout)</td>
-      <td>4-Layer Silent Downgrade</td>
-      <td>4-Layer Cross-Thread Silent Downgrade / Hard Drop</td>
+      <td>4-layer AppZygote Silent Downgrade</td>
+      <td>4-layer AppZygote + 6-gate opt-in Isolated Folding</td>
     </tr>
     <tr>
-      <td><strong>Isolated Service Control</strong></td>
-      <td>None</td>
-      <td>None</td>
-      <td>6-Gate Opt-In Selective Isolated Folding (WebView-Safe)</td>
-    </tr>
-    <tr>
-      <td><strong>Isolated UID Attribution</strong></td>
-      <td>None</td>
+      <td><strong>UID Resolution</strong></td>
+      <td>Package scan</td>
       <td><code>WeakHashMap</code> per record</td>
-      <td>2048 B Lock-Free <code>AtomicLongArray</code> Reverse <code>IdentityGraph</code></td>
+      <td>Lock-free <code>2048 B</code> <code>AtomicLongArray</code> Reverse <code>IdentityGraph</code></td>
     </tr>
     <tr>
-      <td><strong>Settings Interception</strong></td>
+      <td><strong>Environment Coherence</strong></td>
       <td>None</td>
       <td>None</td>
-      <td>Dual-Checkpoint <code>call()</code> (no <code>_track_generation</code>) + <code>query()</code> <code>MatrixCursor</code></td>
+      <td><code>Settings.call+query</code>, sticky <code>USB_STATE</code>, <code>UsbService</code>, <code>AMS.addClient+Push</code>, <code>getChangedPackages</code>, <code>DisplayManager</code></td>
     </tr>
     <tr>
-      <td><strong>USB &amp; ADB Coherence</strong></td>
-      <td>None</td>
-      <td>None</td>
-      <td>Non-mutating sticky <code>USB_STATE</code> clone + <code>UsbService</code> bit-strip</td>
-    </tr>
-    <tr>
-      <td><strong>Accessibility Coherence</strong></td>
-      <td>None</td>
-      <td>None</td>
-      <td><code>addClient()</code> <code>IntPair</code> strip + dynamic <code>ParceledListSlice</code>/<code>List</code> + push guard</td>
-    </tr>
-    <tr>
-      <td><strong>Package &amp; Display Stealth</strong></td>
-      <td>None</td>
-      <td>None</td>
-      <td><code>getChangedPackages</code> nullifier + Virtual/Presentation Display filter</td>
-    </tr>
-    <tr>
-      <td><strong>Telemetry &amp; IPC Security</strong></td>
+      <td><strong>Telemetry &amp; IPC</strong></td>
       <td>Logcat</td>
       <td>Silent Release</td>
-      <td>64-Slot Wait-Free Seqlock + Zero-Oracle IPC Gate + 7-Bit Health Matrix</td>
+      <td>64-slot Seqlock ring buffer + Zero-Oracle IPC + 7-bit health register</td>
     </tr>
     <tr>
-      <td><strong>Static Threat Radar</strong></td>
+      <td><strong>Static Radar</strong></td>
       <td>None</td>
-      <td>Binary AXML AppZygote scan</td>
-      <td>Binary AXML + Zero-Extract Native ELF Antifraud SDK Scanner</td>
+      <td>Binary AXML AppZygote check</td>
+      <td>Binary AXML + zero-extract ZIP ELF classifier + <code>SANDBOX</code> separation</td>
     </tr>
     <tr>
-      <td><strong>Console Engine &amp; APK Size</strong></td>
+      <td><strong>Console UI</strong></td>
       <td>AppCompat / Material</td>
-      <td>~305 KB</td>
-      <td>419 KB Procedural Hardware-Accelerated Canvas (0 Compose/AppCompat/PNG)</td>
+      <td>Standard list UI (~305 KB)</td>
+      <td>Procedural <code>Canvas</code> UI: 5x7 bitmap font, 3D keycaps, Bayer dithering, 4 palettes, zero Compose/AppCompat/PNG</td>
     </tr>
   </tbody>
 </table>
 
-## 2. Four-Plane Isolation Architecture
-
-### 2.1 Vertical Plane Topology (`Kernel` -> `Native` -> `system_server` -> `Userspace`)
+## 2. System Topology
 
 ~~~mermaid
 flowchart TB
-    classDef kernel fill:#1A1416,stroke:#F87171,color:#E6ECF5,stroke-width:1.5px
-    classDef native fill:#1C1912,stroke:#FBBF24,color:#E6ECF5,stroke-width:1.5px
-    classDef engine fill:#112634,stroke:#38BDF8,color:#E6ECF5,stroke-width:1.5px
-    classDef shield fill:#122C1E,stroke:#4ADE80,color:#E6ECF5,stroke-width:1.5px
-    classDef console fill:#231B36,stroke:#A78BFA,color:#E6ECF5,stroke-width:1.5px
+    classDef console fill:#221A3B,stroke:#A78BFA,color:#E6EEF8,stroke-width:1.5px
+    classDef core fill:#10283B,stroke:#4CC2FF,color:#E6EEF8,stroke-width:1.5px
+    classDef shield fill:#112D21,stroke:#4AE38A,color:#E6EEF8,stroke-width:1.5px
+    classDef stock fill:#30240E,stroke:#F5B742,color:#E6EEF8,stroke-width:1.5px
 
-    subgraph PLANE_K["Linux 4.19 Non-GKI Kernel Plane"]
-        K_NS["mnt_namespace and nsproxy"]:::kernel
-        K_SEL["selinuxfs untrusted_app vs isolated_app"]:::kernel
-        K_BND["binderfs Calling UID Enforcement"]:::kernel
+    subgraph UI_PROC["Console App Process - io.github.taro902.isolationpolicy"]
+        UI["MainActivity Procedural Canvas Console"]:::console
+        RAD["ManifestRadar Binary AXML and ZIP ELF Scanner"]:::console
+        PREFS[("XposedService RemotePreferences")]:::console
     end
 
-    subgraph PLANE_N["Native Zygisk and Overlay Plane"]
-        N_ZYG["Zygote64 and ReZygisk v1.0.0"]:::native
-        N_TW["Treat Wheel v0.0.11 Primary Unmount"]:::native
-        N_MNT["mountify v2.0.3 OverlayFS"]:::native
-        N_HMA["HMA-OSS oss-175 Package List Filter"]:::native
-    end
-
-    subgraph PLANE_S["system_server UID 1000 - IsolPolicy v2.1.0"]
+    subgraph SYS_PROC["system_server UID 1000 - Zero Target App Injection"]
         direction TB
-        S_ENG["PolicyEngine AtomicReference Snapshot"]:::engine
-        S_GRP[("IdentityGraph 256-Slot AtomicLongArray 2048 B")]:::engine
-        S_HUB[("TelemetryHub 64-Slot Seqlock and 16-Bit Health")]:::engine
-        S_GATE{"Zero-Oracle IPC Gate"}:::engine
+        ENG["PolicyEngine AtomicReference PolicySnapshot"]:::core
+        GRP[("IdentityGraph 256-Slot AtomicLongArray 2048 B")]:::core
+        HUB[("TelemetryHub 64-Slot Seqlock and 16-Bit Health")]:::core
+        GATE{"Zero-Oracle IPC Gate"}:::core
 
         P1["P1 AppZygoteShield"]:::shield
         P2["P2 IsolatedFoldShield"]:::shield
@@ -187,104 +148,43 @@ flowchart TB
         P7["P7 DisplayShield"]:::shield
     end
 
-    subgraph PLANE_U["Userspace Consoles and Guarded App Plane"]
-        U_UI["MainActivity Procedural Canvas Console"]:::console
-        U_RAD["ManifestRadar AXML and ELF Scanner"]:::console
-        U_PREFS[("XposedService RemotePreferences")]:::console
-        U_APP["Guarded Target UID 10xxx - 0 Bytes Injected"]:::shield
-        U_STOCK["Stock AOSP chain.proceed"]:::native
-    end
+    APP["Guarded Target Process UID 10xxx - Clean Memory"]:::shield
+    AOSP["Stock AOSP chain.proceed"]:::stock
 
-    U_RAD -->|Threat Score and Preset| U_UI
-    U_UI -->|Write Bitmask and AppId Map| U_PREFS
-    U_PREFS -->|Read-Only Listener 0ms Swap| S_ENG
+    RAD -->|Risk Score and Preset| UI
+    UI -->|Write 32-Bit Flags and AppId Map| PREFS
+    PREFS -->|Read-Only Listener 0ms Swap| ENG
 
-    K_BND -->|Kernel Verified callingUid| P3
-    K_BND -->|Kernel Verified callingUid| P4
-    K_BND -->|Kernel Verified callingUid| P5
-    K_BND -->|Kernel Verified callingUid| P6
-    K_BND -->|Kernel Verified callingUid| P7
+    P1 -->|Pack isoUid to ownerAppId| GRP
+    GRP -->|O1 Owner Lookup| ENG
+    ENG --> P1
+    ENG --> P2
+    ENG --> P3
+    ENG --> P4
+    ENG --> P5
+    ENG --> P6
+    ENG --> P7
 
-    P1 -->|Downgrade AppZygote| N_ZYG
-    P2 -->|Fold Internal Iso| N_TW
-    N_ZYG --> K_NS
-    N_TW --> K_SEL
-    N_MNT --> K_NS
-    N_HMA --> U_APP
+    P1 --> HUB
+    P2 --> HUB
+    P3 --> HUB
+    P4 --> HUB
+    P5 --> HUB
+    P6 --> HUB
+    P7 --> HUB
 
-    P1 -->|Pack isoUid to ownerAppId| S_GRP
-    S_GRP -->|O1 Owner Lookup| S_ENG
-    S_ENG --> P1
-    S_ENG --> P2
-    S_ENG --> P3
-    S_ENG --> P4
-    S_ENG --> P5
-    S_ENG --> P6
-    S_ENG --> P7
-
-    P1 --> S_HUB
-    P2 --> S_HUB
-    P3 --> S_HUB
-    P4 --> S_HUB
-    P5 --> S_HUB
-    P6 --> S_HUB
-    P7 --> S_HUB
-
-    P3 --> S_GATE
-    S_GATE -->|Verified selfAppId| S_HUB
-    S_HUB -->|Compact Primitive Bundle| U_UI
-    S_GATE -->|Any Other UID| U_STOCK
-    U_APP -->|Clean Binder IPC| PLANE_S
+    P3 --> GATE
+    GATE -->|Verified selfAppId| HUB
+    HUB -->|Compact Primitive Bundle| UI
+    GATE -->|Any Other UID| AOSP
+    APP -->|Standard Binder IPC| SYS_PROC
 ~~~
 
-### 2.2 In-Memory Data & Wire-Protocol Layout Schematic (`0 ms Native Render`)
+## 3. Bitfields and Formal Model
 
-~~~text
-┌──────────────────────────────────────────────────────────────────────────────┐
-│  REMOTE_PREFERENCES (XposedService SharedPreferences - Read-Only in Server)  │
-│  ├── policy_map_v21 : "id.dana=62;com.bca=122;id.co.cimbniaga.octomobile=122"│
-│  ├── appid_map_v21  : "10245:62:id.dana;10248:122:com.bca"                   │
-│  ├── self_app_id    : 10312 (cross-verified vs moduleApplicationInfo.uid)    │
-│  └── default_az_v21 : 0 (AZ_OFF)                                             │
-└───────────────────────────────┬──────────────────────────────────────────────┘
-                                │ Atomic Copy-on-Write Swap (0 ms, Zero Lock)
-                                ▼
-┌──────────────────────────────────────────────────────────────────────────────┐
-│  POLICY_ENGINE (system_server RAM < 300 KB, 0 B/s Disk I/O)                  │
-│  ├── AtomicReference<PolicySnapshot>                                         │
-│  │     ├── SparseIntArray appIdFlags   : binary-search int[] -> 32-bit mask  │
-│  │     ├── Map<String,Int> pkgFlags    : unmodifiable package fallback       │
-│  │     └── SparseArray<Str> appIdToPkg : telemetry label reverse index       │
-│  │                                                                           │
-│  ├── AtomicLongArray identityGraph[256] (2048 Bytes = 32 ARM64 L1 Lines)     │
-│  │     └── Slot[i] = [ 63..32 : isoUid (90000..99999) | 31..0 : ownerAppId ] │
-│  │         ├── Hash  : ((uid * 0x9E3779B9) ^ (h >>> 16)) & 0xFF              │
-│  │         ├── Probe : max 8 linear slots -> O(1) bounded worst-case         │
-│  │         └── Evict : ProcessList.removeProcessNameLocked -> CAS(packed, 0) │
-│  │                                                                           │
-│  └── TelemetryHub (Wait-Free 64-Slot Seqlock Ring Buffer)                    │
-│        ├── AtomicLong[8] pillarCounts  : [0]=Total, [1..7]=Pillar 1..7       │
-│        ├── AtomicInteger hookHealthMask: 7 x 2-bit status register           │
-│        └── EventSlot[64]               : volatile seq | ts | uid | pil|vec|a │
-└───────────────────────────────┬──────────────────────────────────────────────┘
-                                │ Zero-Oracle Gate (SettingsProvider.call)
-                                ├── callingUid != selfAppId -> chain.proceed()
-                                └── callingUid == selfAppId -> Primitive Bundle
-                                ▼
-┌──────────────────────────────────────────────────────────────────────────────┐
-│  MAIN_ACTIVITY CONSOLE (419 KB R8 APK, < 28 MB RAM, 60 FPS SDM660)           │
-│  ├── GUARD : PixelScopeView (16x8) + 6 Granular Chips + AppInspectorDialog   │
-│  ├── SCOPE : 7-Bit Hook Health Matrix + 64-Event Stream + Copy/Purge         │
-│  ├── RADAR : ManifestRadar (Binary AXML + ZIP ELF Scan) + Self-Coherence     │
-│  └── VAULT : Batch Presets + JSON v2.1.0 Export/Import + Dual PixelTheme     │
-└──────────────────────────────────────────────────────────────────────────────┘
-~~~
+### 3.1 32-Bit `PolicyFlags` Encoding
 
-## 3. Hardware Register and Bitfield Specifications
-
-### 3.1 32-Bit `PolicyFlags` Compact Bitfield Register
-
-Every guarded package's complete 7-pillar policy occupies one 32-bit primitive `int` inside an immutable `SparseIntArray`:
+Each package's 7-pillar configuration fits inside a single primitive `int` stored in an immutable copy-on-write `SparseIntArray`:
 
 <table>
   <thead>
@@ -311,157 +211,78 @@ Every guarded package's complete 7-pillar policy occupies one 32-bit primitive `
   </tbody>
 </table>
 
-| Preset Identifier | Hex Mask | Decimal | Binary (`[6..0]`) | Active Coherent Surface |
-| :--- | :---: | :---: | :---: | :--- |
-| `PRESET_NONE` | `0x00` | `0` | `0000000` | Pass-through (zero interception) |
-| `PRESET_WALLET_ALIPAY` | `0x3E` | `62` | `0111110` | `AZ:DOWN + ISO + DEV + A11Y + PKG` |
-| `PRESET_BANKING_STRICT` | `0x7A` | `122` | `1111010` | `AZ:DOWN + DEV + A11Y + PKG + DISP` |
-| `PRESET_AUDIT_MAX` | `0x7E` | `126` | `1111110` | `AZ:DOWN + ISO + DEV + A11Y + PKG + DISP` |
+| Preset | Hex | Decimal | Active Shields |
+| :--- | :---: | :---: | :--- |
+| `PRESET_NONE` | `0x00` | `0` | Pass-through |
+| `WALLET CORE` | `0x3A` | `58` | `AZ:DOWN + DEV + A11Y + PKG` |
+| `PRESET_WALLET_ALIPAY` | `0x3E` | `62` | `AZ:DOWN + ISO + DEV + A11Y + PKG` |
+| `PRESET_BANKING_STRICT` | `0x7A` | `122` | `AZ:DOWN + DEV + A11Y + PKG + DISP` |
+| `PRESET_AUDIT_MAX` | `0x7E` | `126` | `AZ:DOWN + ISO + DEV + A11Y + PKG + DISP` |
 
-### 3.2 64-Bit Hardware-Atomic `IdentityGraph` Word (`AtomicLongArray[256]`)
-
-<table>
-  <thead>
-    <tr>
-      <th>Bits <code>63..32</code> (32-Bit Unsigned Key)</th>
-      <th>Bits <code>31..0</code> (32-Bit Owner Value)</th>
-      <th>ARM64 Ordering</th>
-      <th>Cache Geometry</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><code>isoUid</code> (<code>90000..99999</code> or multi-user <code>u*100000 + iso</code>)</td>
-      <td><code>ownerAppId</code> (<code>10000..19999</code>)</td>
-      <td>Single-word <code>LDAR</code> / <code>STLR</code> / <code>CAS</code></td>
-      <td><code>256 * 8 B = 2048 B</code> (32 ARM64 64-byte L1 lines)</td>
-    </tr>
-  </tbody>
-</table>
-
-### 3.3 64-Bit `AccessibilityManagerService.addClient()` `IntPair` Projection
+### 3.2 64-Bit `IdentityGraph`, `IntPair` & 16-Bit `HookHealthMask`
 
 <table>
   <thead>
     <tr>
-      <th>Bits <code>63..32</code> (<code>stateFlags</code>)</th>
-      <th>Cleared Bitmask (<code>~0x1B</code>)</th>
-      <th>Bits <code>31..0</code> (<code>relevantEventTypes</code>)</th>
+      <th>Structure</th>
+      <th>Upper Bits</th>
+      <th>Lower Bits</th>
+      <th>Invariant</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td>Accessibility client state word returned to target process</td>
-      <td>Clears bit <code>0</code> (<code>ENABLED</code>), bit <code>1</code> (<code>TOUCH_EXPLORATION</code>), bit <code>3</code> (<code>HIGH_TEXT</code>), bit <code>4</code> (<code>AUDIO_DESC</code>)</td>
-      <td>Preserved verbatim (<code>0xFFFFFFFF</code>) so non-A11y window events remain stable</td>
+      <td><code>IdentityGraph</code> (<code>AtomicLongArray[256]</code>)</td>
+      <td><code>63..32</code>: <code>isoUid</code> (<code>90000..99999</code>)</td>
+      <td><code>31..0</code>: <code>ownerAppId</code> (<code>10000..19999</code>)</td>
+      <td>Single 64-bit atomic word; <code>2048 B</code> fixed RAM; bounded 8-step probe</td>
+    </tr>
+    <tr>
+      <td><code>AMS.addClient()</code> (<code>long IntPair</code>)</td>
+      <td><code>63..32</code>: <code>stateFlags</code> (masked <code>~0x1B</code>)</td>
+      <td><code>31..0</code>: <code>relevantEventTypes</code></td>
+      <td>Clears A11y state bits while preserving non-A11y event flags</td>
+    </tr>
+    <tr>
+      <td><code>HookHealthMask</code> (<code>AtomicInteger</code>)</td>
+      <td><code>13..0</code>: 7 pillars &times; 2 bits</td>
+      <td><code>00</code>=<code>--</code>, <code>01</code>=<code>OK</code>, <code>10</code>=<code>FB</code>, <code>11</code>=<code>ER</code></td>
+      <td>Lock-free CAS updates reported directly to <code>SCOPE</code> and <code>RADAR</code></td>
     </tr>
   </tbody>
 </table>
 
-### 3.4 16-Bit `HookHealthMask` Telemetry Register
+### 3.3 Compact Mathematical Specification
 
-<table>
-  <thead>
-    <tr>
-      <th>Bits <code>15..14</code></th>
-      <th>Bits <code>13..12</code></th>
-      <th>Bits <code>11..10</code></th>
-      <th>Bits <code>9..8</code></th>
-      <th>Bits <code>7..6</code></th>
-      <th>Bits <code>5..4</code></th>
-      <th>Bits <code>3..2</code></th>
-      <th>Bits <code>1..0</code></th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><code>RSVD</code></td>
-      <td><code>DISP</code> (P7)</td>
-      <td><code>PKG</code> (P6)</td>
-      <td><code>A11Y</code> (P5)</td>
-      <td><code>USB</code> (P4)</td>
-      <td><code>SET</code> (P3)</td>
-      <td><code>ISO</code> (P2)</td>
-      <td><code>AZ</code> (P1)</td>
-    </tr>
-  </tbody>
-</table>
-
-State encoding per 2-bit slot: `00` = `NONE (--)`, `01` = `OK (Full Attachment)`, `10` = `FB (Fallback Attachment)`, `11` = `ER (Unavailable)`.
-
-### 3.5 Telemetry Ring-Buffer Event Vector & Action Registry
-
-| Pillar (`1..7`) | Vector Codes (`1..17`) | Emitted Action Codes (`1..7`) |
-| :--- | :--- | :--- |
-| `1: AZ` | `1: byAppZygote`, `2: usesAppZygote`, `3: startProcessLocked`, `4: startProcess` | `1: DOWNGRADE`, `2: HARD_DROP` |
-| `2: ISO` | `5: bringUpService` | `3: FOLD_MAIN` |
-| `3: SET` | `6: GET_global`, `7: GET_secure`, `8: Settings.query` | `4: SPOOFED`, `5: SANITIZED` |
-| `4: USB` | `9: USB_STATE`, `10: UsbFunctions` | `5: SANITIZED`, `6: CLEARED` |
-| `5: A11Y` | `11: AMS.addClient`, `12: AMS.getEnabled`, `13: AMS.getInstalled`, `14: AMS.statePush` | `5: SANITIZED`, `6: CLEARED` |
-| `6: PKG` | `15: getChangedPkgs` | `7: HIDDEN` |
-| `7: DISP` | `16: getDisplayIds`, `17: getDisplayInfo` | `7: HIDDEN` |
-
-## 4. Formal Mathematical Specification
-
-### Theorem 1 — Compact 7-Bit Policy Vector Encoding
-
-Every target package policy is bijectively encoded in $\Phi_u \in [0, 127]$:
+Policy bitmask $\Phi_u \in [0, 127]$ and Fibonacci multiplicative index $h(u)$ over $256$ `IdentityGraph` slots:
 
 $$\Phi_u = m_{\mathrm{AZ}} + 2^{2} f_{\mathrm{ISO}} + 2^{3} f_{\mathrm{DEV}} + 2^{4} f_{\mathrm{A11Y}} + 2^{5} f_{\mathrm{PKG}} + 2^{6} f_{\mathrm{DISP}}$$
 
 $$m_{\mathrm{AZ}} \in \{0, 1, 2, 3\} \equiv \{\text{OFF}, \text{AUTO}, \text{DOWNGRADE}, \text{HARD-DROP}\}$$
 
-$$f_k \in \{0, 1\}, \qquad k \in \{\mathrm{ISO}, \mathrm{DEV}, \mathrm{A11Y}, \mathrm{PKG}, \mathrm{DISP}\}$$
+$$a(u) = u \bmod 100000, \qquad w(u) = (u \cdot \mathrm{0x9E3779B9}) \bmod 2^{32}$$
 
-### Theorem 2 — Hardware-Atomic Reverse `IdentityGraph` & Latency Bound
+$$h(u) = \left(w(u) \oplus \left\lfloor \frac{w(u)}{2^{16}} \right\rfloor\right) \bmod 256, \qquad \mathrm{Mem}(\mathcal{G}) = 256 \times 8\,\mathrm{B} = 2048\,\mathrm{B}$$
 
-Given kernel-verified calling UID $u$, privileged system UIDs ($a(u) \lt 10000$) bypass in one integer branch, while isolated/AppZygote UIDs ($a(u) \ge 90000$) resolve to their owner application via Fibonacci multiplicative hashing across $N = 256$ slots with maximum probe depth $L = 8$:
-
-$$a(u) = u \bmod 100000$$
-
-$$w(u) = (u \cdot \mathrm{0x9E3779B9}) \bmod 2^{32}$$
-
-$$h(u) = \left(w(u) \oplus \left\lfloor \frac{w(u)}{2^{16}} \right\rfloor\right) \bmod 256$$
-
-$$E_i = \left(u_{\mathrm{iso}} \cdot 2^{32}\right) + a_{\mathrm{owner}}$$
-
-$$\mathrm{Mem}(\mathcal{G}) = 256 \times 8\,\mathrm{B} = 2048\,\mathrm{B} = 32 \times 64\,\mathrm{B}_{\mathrm{L1}}$$
-
-$$T_{\mathrm{lookup}}(u) \le L \cdot t_{\mathrm{LDAR}} = 8 \cdot t_{\mathrm{LDAR}} = \mathcal{O}(1)$$
-
-### Theorem 3 — Wait-Free Seqlock Correctness (`TelemetryHub`)
-
-For capacity $C = 64$, writer $W$ claims sequence $q$ via atomic `getAndIncrement()`, writes slot $j = q \bmod 64$ with sentinel $-1$, commits primitive fields, and publishes $q + 1$. Reader $R$ accepts slot $j$ if and only if both volatile fence observations match and are strictly positive:
+Wait-free Seqlock acceptance rule for ring slot $j = q \bmod 64$ and 64-bit `IntPair` projection ($M_{\mathrm{clear}} = \mathrm{0x1B}$):
 
 $$\mathrm{Valid}(j) \iff \left(s_{1} = s_{2}\right) \land \left(s_{1} \gt 0\right)$$
 
-### Theorem 4 — Cross-API Observational Equivalence
+$$R_{\mathrm{out}} = \left(\left(S_{\mathrm{state}} \setminus \{2^{0}, 2^{1}, 2^{3}, 2^{4}\}\right) \cdot 2^{32}\right) + E_{\mathrm{events}}$$
 
-Define environment query surfaces $\mathcal{V}_{\mathrm{DEV}} = \{\mathrm{Settings.call},\, \mathrm{Settings.query},\, \text{USB-STATE},\, \mathrm{UsbService}\}$ and $\mathcal{V}_{\mathrm{A11Y}} = \{\mathrm{Settings.secure},\, \mathrm{AMS.addClient},\, \mathrm{AMS.enabled},\, \mathrm{AMS.installed},\, \mathrm{AMS.push}\}$. For every guarded UID $u$ with $f_{\mathrm{DEV}} = 1$ (resp. $f_{\mathrm{A11Y}} = 1$):
-
-$$\forall v_i, v_j \in \mathcal{V}_{\mathrm{DEV}}:\quad \Pi_{v_i}(u) \equiv \Pi_{v_j}(u) \equiv \Omega_{\mathrm{clean}}$$
-
-$$\forall v_i, v_j \in \mathcal{V}_{\mathrm{A11Y}}:\quad \Pi_{v_i}(u) \equiv \Pi_{v_j}(u) \equiv \Omega_{\mathrm{clean}}$$
-
-### Theorem 5 — 64-Bit `IntPair` Projection & Deterministic Risk Function
-
-For `AccessibilityManagerService.addClient()` output $R_{\mathrm{raw}}$ and static package surface $p$:
-
-$$R_{\mathrm{raw}} = \left(S_{\mathrm{state}} \cdot 2^{32}\right) + E_{\mathrm{events}}, \qquad M_{\mathrm{clear}} = 2^{0} + 2^{1} + 2^{3} + 2^{4} = \mathrm{0x1B}$$
-
-$$S_{\mathrm{clean}} = \sum_{b \in \{0..31\} \setminus \{0,1,3,4\}} s_b \cdot 2^{b}, \qquad R_{\mathrm{out}} = \left(S_{\mathrm{clean}} \cdot 2^{32}\right) + E_{\mathrm{events}}$$
+Deterministic static risk score $\mathcal{R}(p) \in [0, 100]$ for non-sandbox applications:
 
 $$\mathcal{R}(p) = \min\left(100,\, 45 \cdot \mathbf{1}_{\mathrm{AZ}} + 25 \cdot \mathbf{1}_{\mathrm{ISO}} + \min\left(35,\, 20 \cdot |\mathcal{S}_{\mathrm{ELF}}|\right) + 10 \cdot \mathbf{1}_{\mathrm{QAP}} + 15 \cdot \mathbf{1}_{\mathrm{FIN}}\right)$$
 
-## 5. Seven-Pillar Server-Side Engine
+## 4. Seven-Pillar Java Engine
 
 <table>
   <thead>
     <tr>
       <th>Pillar</th>
-      <th>Class</th>
-      <th>AOSP Target Class &amp; Hooked Methods</th>
-      <th>Safety Invariant &amp; Android 10-16 Compatibility</th>
+      <th>Java Class</th>
+      <th>Hooked AOSP Targets</th>
+      <th>Core Behavior &amp; Guardrails</th>
     </tr>
   </thead>
   <tbody>
@@ -469,235 +290,50 @@ $$\mathcal{R}(p) = \min\left(100,\, 45 \cdot \mathbf{1}_{\mathrm{AZ}} + 25 \cdot
       <td><strong>P1 — AppZygote</strong></td>
       <td><code>AppZygoteShield.java</code></td>
       <td><code>HostingRecord.byAppZygote</code>, <code>usesAppZygote</code>, <code>ProcessList.startProcessLocked</code>, <code>startProcess</code>, <code>removeProcessNameLocked</code></td>
-      <td>Dynamic parameter-type indexing per overload + <code>module.deoptimize()</code> + cross-thread <code>WeakHashMap</code> tracking + <code>IdentityGraph</code> registration &amp; eviction.</td>
+      <td>4-layer cross-thread Silent Downgrade (<code>mHostingZygote = 0</code>) or Hard Drop + <code>module.deoptimize()</code> + live <code>IdentityGraph</code> registration and eviction.</td>
     </tr>
     <tr>
       <td><strong>P2 — Isolated Fold</strong></td>
       <td><code>IsolatedFoldShield.java</code></td>
       <td><code>ActiveServices.bringUpServiceLocked</code></td>
-      <td>6-Gate Anti-Crash Filter protecting all external WebView/Chrome sandboxes while folding opt-in internal isolated helpers into Treat Wheel clean <code>UID 10xxx</code>.</td>
+      <td>Opt-in folding of internal <code>FLAG_ISOLATED_PROCESS</code> helpers into clean <code>UID 10xxx</code>. Enforces 6 strict guards blocking <code>FLAG_EXTERNAL_SERVICE</code>, <code>FLAG_USE_APP_ZYGOTE</code>, dynamic instances, and WebView/Chrome/GMS packages.</td>
     </tr>
     <tr>
       <td><strong>P3 — Settings &amp; IPC</strong></td>
       <td><code>SettingsShield.java</code></td>
-      <td><code>SettingsProvider.call</code> (3-arg &amp; 4-arg), <code>SettingsProvider.query</code> (Dual-Checkpoint <code>onPackageLoaded</code> + <code>onPackageReady</code>)</td>
-      <td>Returns single-key <code>Bundle("value")</code> omitting <code>_track_generation</code> (prevents global <code>MemoryIntArray</code> cache poisoning), rewrites SQL cursors via <code>MatrixCursor</code>, and enforces Zero-Oracle IPC Gate.</td>
+      <td><code>SettingsProvider.call</code> (3/4-arg), <code>SettingsProvider.query</code></td>
+      <td>Attached idempotently via <code>onPackageLoaded</code> + <code>onPackageReady</code>. Returns single-key <code>Bundle("value")</code> without <code>_track_generation</code>, sanitizes full and single-column SQL cursors via <code>MatrixCursor</code>, and hosts the Zero-Oracle IPC Gate.</td>
     </tr>
     <tr>
       <td><strong>P4 — USB &amp; ADB</strong></td>
       <td><code>UsbBroadcastShield.java</code></td>
-      <td><code>ActivityManagerService.registerReceiverWithFeature</code>, <code>registerReceiver</code>, <code>UsbService.getCurrentFunctions</code>, <code>isFunctionEnabled</code></td>
-      <td>Clones sticky <code>ACTION_USB_STATE</code> via <code>new Intent(sticky)</code> without mutating <code>mStickyBroadcasts</code>, sets <code>adb=false</code>, and masks <code>FUNCTION_ADB (1L)</code> while keeping USB MTP intact.</td>
+      <td><code>ActivityManagerService.registerReceiverWithFeature</code>, <code>UsbService.getCurrentFunctions</code>, <code>isFunctionEnabled</code></td>
+      <td>Clones sticky <code>ACTION_USB_STATE</code> via <code>new Intent(sticky)</code> with <code>adb=false</code> (never mutates system sticky intents) and strips bit 0 (<code>FUNCTION_ADB = 1L</code>) while preserving USB MTP and Tethering.</td>
     </tr>
     <tr>
       <td><strong>P5 — Accessibility</strong></td>
       <td><code>AccessibilityShield.java</code></td>
-      <td><code>AccessibilityManagerService.addClient</code>, <code>getEnabledAccessibilityServiceList</code>, <code>getInstalledAccessibilityServiceList</code>, <code>getAccessibilityShortcutTargets</code>, <code>IAccessibilityManagerClient$Stub$Proxy.setState</code></td>
-      <td>Strips <code>IntPair</code> flags <code>0x1B</code>, dynamically inspects <code>method.getReturnType()</code> for <code>ParceledListSlice</code> (Android 13-16) vs <code>List</code> (Android 10-12), and filters live push updates via <code>WeakHashMap&lt;IBinder, Integer&gt;</code>.</td>
+      <td><code>AccessibilityManagerService.addClient</code>, <code>getEnabledAccessibilityServiceList</code>, <code>getInstalledAccessibilityServiceList</code>, <code>IAccessibilityManagerClient$Stub$Proxy.setState</code></td>
+      <td>Clears <code>IntPair</code> mask <code>0x1B</code>, dynamically matches <code>ParceledListSlice</code> (Android 13-16) vs <code>List</code> (Android 10-12), and filters live push callbacks via <code>WeakHashMap&lt;IBinder, Integer&gt;</code>.</td>
     </tr>
     <tr>
       <td><strong>P6 — Package Delta</strong></td>
       <td><code>PackageChangeShield.java</code></td>
-      <td><code>IPackageManagerBase</code>, <code>PackageManagerService$IPackageManagerImpl</code>, <code>PackageManagerService</code>, fallback <code>ComputerEngine.getChangedPackages</code></td>
-      <td>Intercepts Binder entrypoints prior to <code>clearCallingIdentity()</code>, returning <code>null</code> for guarded UIDs to close post-boot package delta leaks orthogonal to HMA-OSS.</td>
+      <td><code>IPackageManagerBase</code>, <code>PackageManagerService$IPackageManagerImpl</code>, <code>PackageManagerService</code>, fallback <code>ComputerEngine</code></td>
+      <td>Returns <code>null</code> for <code>getChangedPackages()</code> at Binder entrypoints before <code>clearCallingIdentity()</code>, orthogonal to HMA-OSS app-list hiding.</td>
     </tr>
     <tr>
       <td><strong>P7 — Display Stealth</strong></td>
       <td><code>DisplayShield.java</code></td>
       <td><code>DisplayManagerService$BinderService.getDisplayIds</code>, <code>getDisplayInfo</code></td>
-      <td>Projects display topology to physical <code>Display.DEFAULT_DISPLAY (0)</code> and returns <code>null</code> for non-zero virtual/presentation display IDs without touching <code>FLAG_SECURE</code>.</td>
+      <td>Projects display list to physical <code>Display.DEFAULT_DISPLAY (0)</code> and returns <code>null</code> for non-zero virtual/presentation display info queries without touching <code>FLAG_SECURE</code>.</td>
     </tr>
   </tbody>
 </table>
 
-### 5.1 Six-Gate Anti-Crash WebView Proof (`IsolatedFoldShield`)
+### Key Java Implementation Excerpts
 
-AOSP `ActiveServices` enforces a strict `SecurityException` whenever `BIND_EXTERNAL_SERVICE` binds a service without `FLAG_ISOLATED_PROCESS`. Pillar 2 clears `FLAG_ISOLATED_PROCESS` **if and only if** all 6 predicates hold simultaneously:
-
-| Gate | Predicate Verified in `IsolatedFoldShield.evaluateAndFold()` | Protected Component |
-| :---: | :--- | :--- |
-| `G1` | `(serviceInfo.flags & 0x0002) != 0` | Ignores ordinary non-isolated services |
-| `G2` | `(serviceInfo.flags & (0x0004 \| 0x0008)) == 0` | Strictly skips `FLAG_EXTERNAL_SERVICE` and `FLAG_USE_APP_ZYGOTE` |
-| `G3` | `serviceRecord.isolatedProc == null` | Never mutates an already spawned isolated process |
-| `G4` | `!PROTECTED_SANDBOX_PKGS.contains(appInfo.packageName)` | Protects WebView, Chrome, Trichrome, Brave, Firefox, Edge, SystemUI, GMS |
-| `G5` | `definingUid == appInfo.uid` AND `instanceName == name` | Blocks cross-package bindings and dynamic `bindIsolatedService` |
-| `G6` | `engine.hasFlagForUidOrPackage(..., FLAG_ISO_FOLD)` | Strictly opt-in per guarded package |
-
-### 5.2 Five-Phase Cross-Thread & Coherent Binder Choreography
-
-~~~mermaid
-sequenceDiagram
-    participant App as Guarded Financial App
-    participant AM as ActivityManager and ActiveServices
-    participant ProcT as ProcessStart Worker Thread
-    participant Eng as PolicyEngine and IdentityGraph
-    participant Svc as SettingsProvider AMS Usb DMS PMS
-    participant Hub as TelemetryHub Seqlock
-    participant UI as IsolPolicy Console
-
-    App->>AM: Phase 1 bindService with AppZygote or isolatedProcess
-    AM->>Eng: O1 Lookup 32-bit PolicyFlags by AppId or Package
-    alt AppZygote Service and AZ_DOWNGRADE
-        AM->>AM: Mutate mHostingZygote to REGULAR_ZYGOTE in WeakHashMap
-        AM->>ProcT: Dispatch startProcess on worker thread
-        ProcT->>ProcT: Enforce REGULAR_ZYGOTE invariant across threads
-        ProcT->>Hub: Record PILLAR_APP_ZYGOTE ACT_DOWNGRADED
-    else Internal Isolated Helper and FLAG_ISO_FOLD
-        AM->>AM: Verify all 6 WebView safety gates then clear FLAG_ISOLATED_PROCESS
-        AM->>Hub: Record PILLAR_ISO_FOLD ACT_FOLDED
-    else Isolated Process Permitted
-        AM->>Eng: Atomic STLR pack isoUid and ownerAppId into AtomicLongArray
-    end
-
-    App->>Svc: Phase 2 Settings.Global call and SQL query bypass
-    Svc->>Eng: Resolve effective ownerAppId including isolated UIDs
-    Svc-->>App: Single-key Bundle omitting _track_generation and MatrixCursor
-    Svc->>Hub: Record PILLAR_SETTINGS ACT_SPOOFED
-
-    App->>Svc: Phase 3 registerReceiverWithFeature USB_STATE and UsbService
-    Svc-->>App: Cloned sticky Intent adb false and cleared FUNCTION_ADB bit
-    Svc->>Hub: Record PILLAR_USB ACT_SANITIZED
-
-    App->>Svc: Phase 4 AMS addClient DMS getDisplayIds PMS getChangedPackages
-    Svc-->>App: Cleared IntPair state display 0 only and null package delta
-    Svc->>Hub: Record PILLAR_A11Y PILLAR_DISPLAY PILLAR_PKG_CHANGE
-
-    App->>Svc: Phase 5A Probe ISOLPOLICY_IPC_V21 from unauthorized UID
-    Svc-->>App: Stock AOSP chain.proceed pass-through with zero oracle
-
-    UI->>Svc: Phase 5B Call ISOLPOLICY_IPC_V21 from verified selfAppId
-    Svc->>Hub: Tear-free seqlock scan of 64-slot ring buffer
-    Svc-->>UI: Primitive arrays counts uptime graphSize and hookHealthMask
-~~~
-
-## 6. Static Threat Radar and ELF Signatures
-
-`ManifestRadar` executes 100% offline inside the console app on a 2-thread background pool with `lastUpdateTime` caching (zero re-reads on scroll, zero eMMC extraction, zero `BlockedPrivateApi` reflection).
-
-### 6.1 Weighted Threat Score Allocation (Capped at `100`)
-
-| Threat Signal | Score Weight | Visual Weight Distribution | Detection Source |
-| :--- | :---: | :--- | :--- |
-| **AppZygote Preload / Service** | `+45` | `██████████████████░░` (`45`) | Binary AXML `zygotePreloadName` + `ServiceInfo.flags & 0x08` |
-| **Native Antifraud ELF SDKs** | `+20 / SDK` (max `+35`) | `██████████████░░░░░░` (`35`) | Streaming `ZipFile` Central Directory `lib/*.so` header scan |
-| **Internal Isolated Services** | `+25` | `██████████░░░░░░░░░░` (`25`) | Binary AXML + `ServiceInfo.flags & 0x02` (excluding `0x04`) |
-| **Financial Domain Profile** | `+15` | `██████░░░░░░░░░░░░░░` (`15`) | 48-token Indonesian banking, e-wallet & fintech classifier |
-| **`QUERY_ALL_PACKAGES` Surface** | `+10` | `████░░░░░░░░░░░░░░░░` (`10`) | Binary AXML `<uses-permission>` manifest inspection |
-
-### 6.2 Native Antifraud Library Classifier (`ManifestRadar.classifyNativeLib()`)
-
-| Classified SDK Tag | Matched ELF Filename Signatures (`lib/<abi>/*.so`) | Typical Target Class |
-| :--- | :--- | :--- |
-| `ALIPAY_APSE` | `libapse*`, `libsgmain*`, `libsgsecurity*` | DANA / Alipay Security SDK |
-| `PROMON_SHIELD` | `*promon*`, `*shield_jni*` | Tier-1 Mobile Banking |
-| `VKEY_VGUARD` | `*vguard*`, `*voswrapper*`, `*vkey*` | Banking & Enterprise Auth |
-| `APPSEALING` | `*appsealing*`, `*covault*` | Fintech & Anti-Tamper Suites |
-| `THREATMETRIX` | `*libtmx*`, `*tmxprofiling*` | Fraud Telemetry SDKs |
-| `DEXPROTECTOR` | `*dexprotector*` | Hardened Commercial Packers |
-| `PACKER_GUARD` | `*jiagu*`, `*dexhelper*`, `*secneo*` | Native DEX Protectors |
-| `HARDENED_SDK` | `*liapp*`, `*ijm*`, `*bangcle*` | Runtime Integrity Guards |
-
-## 7. Dual-Checkpoint Lifecycle and Zero-Oracle IPC
-
-### 7.1 `system_server` Attachment & Atomic Snapshot State Machine
-
-~~~mermaid
-stateDiagram-v2
-    [*] --> ModuleLoaded: Zygote loads module APK
-    ModuleLoaded --> Detached: Non system_server process calls detach
-    Detached --> [*]
-
-    ModuleLoaded --> EngineInit: system_server verified bind RemotePreferences
-    EngineInit --> SystemServerBoot: onSystemServerStarting receives sysCl
-    SystemServerBoot --> CoreShieldsAttached: Install Pillars 1 2 4 5 6 7 and probe P3
-
-    CoreShieldsAttached --> CheckpointLoaded: onPackageLoaded settings provider
-    CoreShieldsAttached --> CheckpointReady: onPackageReady settings provider
-
-    CheckpointLoaded --> AllSevenActive: AtomicBoolean CAS false to true
-    CheckpointReady --> AllSevenActive: Idempotent attachment guard
-
-    AllSevenActive --> SnapshotSwap: User toggles shield in console
-    SnapshotSwap --> AllSevenActive: AtomicReference replaced in 0ms
-    AllSevenActive --> GraphEvict: Isolated process terminated
-    GraphEvict --> AllSevenActive: AtomicLongArray slot cleared via CAS
-~~~
-
-### 7.2 Zero-Oracle IPC Command Contract (`ISOLPOLICY_IPC_V21`)
-
-| Caller Identity (`Binder.getCallingUid()`) | Command (`IPC_ARG_CMD`) | Returned Payload | Side Effect / Oracle Exposure |
-| :--- | :---: | :--- | :--- |
-| **Any UID != `verifiedSelfAppId`** | Any command | `chain.proceed()` (Stock AOSP) | **Zero Oracle** — response identical to unpatched AOSP |
-| **`verifiedSelfAppId` (Console App)** | `SNAP` | `total`, `counts[8]`, `health`, `uptime`, `guarded`, `graph`, `api`, `fw`, `ev_*[]` | Tear-free read of 64-slot Seqlock ring buffer |
-| **`verifiedSelfAppId` (Console App)** | `PING` | `ok=true`, `health`, `api`, `ver="2.1.0"` | Used by `RADAR -> RUN TEST` self-coherence verifier |
-| **`verifiedSelfAppId` (Console App)** | `PURGE` | `ok=true` | Atomically zeroes `pillarCounts`, `writeSeq`, and ring slots |
-
-## 8. Polyglot Systems Internals
-
-Every boundary across Linux 4.19 kernel namespaces, ARM64 memory ordering, Binder IPC, AIDL, ART hooks, SQLite cursor sanitization, Binary AXML, Gradle CI, R8 shrinking, offline Python analysis, and runtime shell auditing is shown in its native language.
-
-### 8.1 C — Linux 4.19 Non-SUSFS Mount Namespace & SELinux Context Split
-
-~~~c
-struct task_struct *zygote_fork_isolated(struct task_struct *zygote, uid_t iso_uid) {
-    struct nsproxy *ns = copy_nsproxy(zygote->nsproxy);
-    if (iso_uid >= 90000 && iso_uid <= 99999) {
-        return create_isolated_task(ns, SELINUX_DOMAIN_ISOLATED_APP);
-    }
-    return create_untrusted_task(unmount_zygisk_mounts(ns), SELINUX_DOMAIN_UNTRUSTED_APP);
-}
-~~~
-
-### 8.2 ARM64 Assembly — Kryo 260 Hardware-Atomic `IdentityGraph` (`LDAR`/`STLR`)
-
-~~~asm
-lsl     x10, x0, #32
-and     x11, x1, #0xffffffff
-orr     x10, x10, x11
-add     x12, x2, x3, lsl #3
-stlr    x10, [x12]
-
-ldar    x13, [x12]
-lsr     w14, x13, #32
-cmp     w14, w0
-b.ne    .Lprobe_next
-and     w0, x13, #0xffffffff
-ret
-~~~
-
-### 8.3 C++ — Native Binder Boundary (`binderfs` Kernel `sender_euid`)
-
-~~~cpp
-status_t BpBinder::transact(uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags) {
-    binder_transaction_data tr{};
-    tr.target.handle = mHandle;
-    tr.code = code;
-    tr.flags = flags;
-    return IPCThreadState::self()->transact(mHandle, code, data, reply, flags);
-}
-~~~
-
-### 8.4 AIDL — Intercepted AOSP System Binder Contracts
-
-~~~aidl
-interface IAccessibilityManager {
-    long addClient(IAccessibilityManagerClient client, int userId);
-    List<AccessibilityServiceInfo> getEnabledAccessibilityServiceList(int feedbackType, int userId);
-    ParceledListSlice getInstalledAccessibilityServiceList(int userId);
-}
-
-interface IDisplayManager {
-    int[] getDisplayIds(boolean includeDisabled);
-    DisplayInfo getDisplayInfo(int displayId);
-}
-
-interface IUsbManager {
-    long getCurrentFunctions();
-    boolean isFunctionEnabled(String function);
-}
-~~~
-
-### 8.5 Java — Lock-Free `IdentityGraph`, Wait-Free Seqlock & `IntPair` Projection
+#### Lock-Free 64-Bit `IdentityGraph` (`hook/PolicyEngine.java`)
 
 ~~~java
 private void putIdentityGraph(int isoUid, int ownerAppId) {
@@ -720,17 +356,54 @@ private void putIdentityGraph(int isoUid, int ownerAppId) {
 }
 ~~~
 
+#### Wait-Free Seqlock Telemetry Ring (`hook/TelemetryHub.java`)
+
 ~~~java
-void write(long nextSeq, long ts, int uid, int pil, int vec, int act) {
-    seq = -1L;
-    timestampMs = ts;
-    appId = uid;
-    pillar = pil;
-    vector = vec;
-    action = act;
-    seq = nextSeq;
+public void record(int appId, int pillar, int vector, int action) {
+    pillarCounts[0].incrementAndGet();
+    if (pillar >= 1 && pillar <= 7) {
+        pillarCounts[pillar].incrementAndGet();
+    }
+    long seq = writeSeq.getAndIncrement();
+    EventSlot slot = ring[(int) (seq & (CAPACITY - 1))];
+    slot.write(seq + 1L, System.currentTimeMillis(), appId, pillar, vector, action);
 }
 ~~~
+
+#### Six-Gate WebView-Safe Isolated Folding (`hook/IsolatedFoldShield.java`)
+
+~~~java
+int sFlags = sInfo.flags;
+if ((sFlags & FLAG_ISOLATED) == 0) return;
+if ((sFlags & FLAG_EXTERNAL) != 0 || (sFlags & FLAG_APP_ZYGOTE) != 0) return;
+if (fIsolatedProc != null && fIsolatedProc.get(sr) != null) return;
+if (aInfo.uid < 10000 || aInfo.packageName == null) return;
+if (PROTECTED_SANDBOX_PKGS.contains(aInfo.packageName)) return;
+if (!engine.hasFlagForUidOrPackage(aInfo.uid, aInfo.packageName, PolicyFlags.FLAG_ISO_FOLD)) return;
+
+sInfo.flags = sFlags & ~FLAG_ISOLATED;
+~~~
+
+#### Dual-Path `SettingsProvider` & Zero-Oracle IPC Gate (`hook/SettingsShield.java`)
+
+~~~java
+if (PolicyFlags.IPC_METHOD.equals(method)) {
+    if (!engine.isVerifiedSelfUid(callingUid)) {
+        return chain.proceed();
+    }
+    return handleAuthenticatedIpc(cmd, engine, telemetry);
+}
+
+String spoofed = lookupSpoofValue(method, key, flags);
+if (spoofed != null) {
+    telemetry.record(appId, PolicyFlags.PILLAR_SETTINGS, vec, PolicyFlags.ACT_SPOOFED);
+    Bundle out = new Bundle(1);
+    out.putString("value", SENTINEL_NULL.equals(spoofed) ? null : spoofed);
+    return out;
+}
+~~~
+
+#### Coherent `IntPair` Projection (`hook/AccessibilityShield.java`)
 
 ~~~java
 long packed = (Long) res;
@@ -738,46 +411,115 @@ int state = (int) (packed >> 32);
 int events = (int) packed;
 int cleanState = state & ~A11Y_STATE_CLEAR_MASK;
 if (cleanState != state) {
+    int appId = engine.resolveEffectiveAppId(callingUid);
     telemetry.record(appId, PolicyFlags.PILLAR_A11Y, PolicyFlags.VEC_A11Y_CLIENT, PolicyFlags.ACT_SANITIZED);
     return (((long) cleanState) << 32) | (events & 0xFFFFFFFFL);
 }
 ~~~
 
-### 8.6 SQL — Intercepted `SettingsProvider.query()` Cursor Bypass Vectors
+## 5. Binder Interception Flow
 
-~~~sql
-SELECT _id, name, value
-FROM global
-WHERE name IN ('development_settings_enabled', 'adb_enabled', 'adb_wifi_enabled');
+~~~mermaid
+sequenceDiagram
+    participant App as Guarded App
+    participant AM as ActivityManager and ActiveServices
+    participant Worker as ProcessStart Worker
+    participant Eng as PolicyEngine and IdentityGraph
+    participant Svc as Settings AMS Usb DMS PMS
+    participant Hub as TelemetryHub
+    participant UI as IsolPolicy Console
 
-SELECT value
-FROM secure
-WHERE name = 'accessibility_enabled';
+    App->>AM: bindService with useAppZygote or isolatedProcess
+    AM->>Eng: Lookup 32-bit PolicyFlags in O1
+    alt AppZygote with AZ_DOWNGRADE
+        AM->>AM: Set mHostingZygote to REGULAR_ZYGOTE in WeakHashMap
+        AM->>Worker: Dispatch startProcess cross-thread
+        Worker->>Hub: Record PILLAR_APP_ZYGOTE ACT_DOWNGRADED
+    else Internal Isolated with FLAG_ISO_FOLD
+        AM->>AM: Validate 6 WebView guards then clear FLAG_ISOLATED_PROCESS
+        AM->>Hub: Record PILLAR_ISO_FOLD ACT_FOLDED
+    else Isolated Process Permitted
+        AM->>Eng: Atomic pack isoUid and ownerAppId into AtomicLongArray
+    end
+
+    App->>Svc: Settings call and SQL query cursor
+    Svc->>Eng: Resolve ownerAppId via Snapshot or IdentityGraph
+    Svc-->>App: Single-key Bundle without _track_generation and MatrixCursor
+    Svc->>Hub: Record PILLAR_SETTINGS ACT_SPOOFED
+
+    App->>Svc: registerReceiverWithFeature USB_STATE and UsbService
+    Svc-->>App: Cloned sticky Intent adb false and cleared FUNCTION_ADB
+    Svc->>Hub: Record PILLAR_USB ACT_SANITIZED
+
+    App->>Svc: AMS addClient DMS getDisplayIds PMS getChangedPackages
+    Svc-->>App: Masked IntPair display 0 only and null delta
+    Svc->>Hub: Record A11Y DISPLAY PKG
+
+    App->>Svc: Probe ISOLPOLICY_IPC_V21 from unauthorized UID
+    Svc-->>App: Stock AOSP chain.proceed response with zero oracle
+
+    UI->>Svc: Call ISOLPOLICY_IPC_V21 from verified selfAppId
+    Svc->>Hub: Tear-free seqlock read of 64-slot ring buffer
+    Svc-->>UI: Counts uptime graphSize events and 16-bit health mask
 ~~~
 
-> [!TIP]
-> `SettingsShield.query()` handles both full-column cursors (`name` + `value`) and single-column projections (`projection = ["value"]`) by inferring the queried key from URI path segments or `selectionArgs`, allocating a `MatrixCursor` only when at least one row requires sanitization.
+## 6. Lifecycle and Zero-Oracle IPC
 
-### 8.7 XML — Binary AXML Surface & Adaptive Vector Icon
+~~~mermaid
+stateDiagram-v2
+    [*] --> ModuleLoaded: Zygote loads APK
+    ModuleLoaded --> Detached: Non system_server calls detach
+    Detached --> [*]
 
-~~~xml
-<application android:zygotePreloadName="com.target.security.Preload">
-    <service
-        android:name=".IsolatedProbeService"
-        android:isolatedProcess="true"
-        android:useAppZygote="true"
-        android:externalService="false" />
-</application>
+    ModuleLoaded --> EngineInit: system_server binds RemotePreferences
+    EngineInit --> SystemServerBoot: onSystemServerStarting receives sysCl
+    SystemServerBoot --> CoreAttached: Install Pillars 1 2 4 5 6 7 and probe P3
+
+    CoreAttached --> CheckpointLoaded: onPackageLoaded settings provider
+    CoreAttached --> CheckpointReady: onPackageReady settings provider
+
+    CheckpointLoaded --> Operational: AtomicBoolean CAS false to true
+    CheckpointReady --> Operational: Idempotent guard verified
+
+    Operational --> SnapshotSwap: User toggles keycap in console
+    SnapshotSwap --> Operational: AtomicReference replaced in 0ms
+    Operational --> GraphEvict: Isolated process terminated
+    GraphEvict --> Operational: AtomicLongArray slot cleared via CAS
 ~~~
 
-~~~xml
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@drawable/ic_launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
-</adaptive-icon>
-~~~
+| Caller (`Binder.getCallingUid()`) | IPC Command | Response | Oracle Surface |
+| :--- | :---: | :--- | :--- |
+| Any UID != `verifiedSelfAppId` | Any | `chain.proceed()` (Stock AOSP) | None (identical to unpatched AOSP) |
+| `verifiedSelfAppId` | `SNAP` | Primitive arrays (`counts`, `health`, `uptime`, `graph`, `ev_*`) | Authenticated live telemetry snapshot |
+| `verifiedSelfAppId` | `PING` | `ok=true`, `health`, `api`, `ver="2.1.1"` | Used by `RADAR` coherence check |
+| `verifiedSelfAppId` | `PURGE` | `ok=true` | Resets counters and clears ring buffer |
 
-### 8.8 Kotlin DSL — Gradle CI & `libxposed` API 102 Build Contract
+## 7. Procedural Canvas Console
+
+All UI chrome in `v2.1.1` is rendered directly in Java via `android.graphics.Canvas` with zero Jetpack Compose, zero AppCompat, zero Material Components, zero `.ttf` font files, and zero raster `.png` assets. Every `Paint`, `Rect`, and `BitmapShader` is pre-allocated outside `onDraw()`.
+
+### Rendering Primitives (`ui/pixel/`)
+
+* **`PixelFont.java` & `PixelTextView.java`:** Procedural 5x7 integer-scaled bitmap raster font (52 ASCII glyphs, `setAntiAlias(false)`) used for all headers, keycaps, badges, counters, and dock labels.
+* **`PixelChrome.java`:** 9-slice stepped pixel borders with explicit corner-connector dots, 1-unit hard drop shadows, 4x4 Bayer ordered dithering `BitmapShader`, and left-edge guarded status rails.
+* **`PixelKeycapView.java`:** Mechanical 3D keycap buttons with a 2-unit solid bottom lip that physically depresses downward on touch, integrated 4x4 pixel LEDs (or 4-block palette preview swatches), and 3-frame scan-fill transitions.
+* **`PixelSpriteAtlas.java`:** Palette-indexed 2-bit dual-tone sprites (`14x14` shield crest, `12x12` dock icons for Shield, CRT Scope, Radar Dish, Vault Safe, `9x9` search lens, `7x7` close glyph).
+* **`PixelCounterStrip.java` & `PixelScopeView.java`:** 7 clickable pillar counter tiles (`AZ` through `DISP` — tapping any tile jumps directly to `SCOPE` filtered to that pillar) paired with an auto-seeded 16x8 spectrum oscilloscope with floating peak-hold caps.
+* **`PixelDockBar.java`:** Physical cartridge-style bottom dock where the active tab pops upward by 2 pixel units above a Bayer-dithered inactive rail.
+* **`ManifestRadar.java`:** Offline Binary AXML (`AssetManager.openXmlResourceParser`) + zero-extract ZIP Central Directory ELF classifier (`ALIPAY`, `PROMON`, `VKEY`, `APPSEALING`, `THREATMETRIX`, `DEXPROT`, `PACKER`, `HARDENED`). Separates browsers and chat/media apps cleanly into `SANDBOX` (`SAFE OFF`) so `AUTO BANK` and batch presets never touch Chrome, Brave, Firefox, WhatsApp, Telegram, Instagram, or Facebook.
+
+### Four Curated Hardware Palettes (`PixelPalette.java`)
+
+| Palette | Mode | Canvas / Panel / Card | Semantic Accents |
+| :--- | :---: | :---: | :--- |
+| **`CRT PHOSPHOR`** | Dark Default | `#0B0E14` / `#131822` / `#1A2130` | `#4AE38A` · `#4CC2FF` · `#F5B742` · `#F25C6B` · `#A78BFA` |
+| **`DMG PAPER`** | Daylight LCD | `#E7E3D4` / `#F2EFE4` / `#FAF8F0` | `#1A6B3C` · `#1E56A0` · `#A15C13` · `#A62C2B` · `#543C8A` |
+| **`AMBER CRT`** | Monochrome Dark | `#110D08` / `#1B140C` / `#231A10` | `#FFB000` · `#FFD166` · `#FF922B` · `#FF6B35` |
+| **`POCKET OLIVE`** | 4-Shade Handheld | `#CADC9F` / `#BDCE94` / `#D4E5AB` | `#0F380F` · `#306230` · `#8BAC0F` · `#9BBC0F` |
+
+## 8. Project Configuration and Tree
+
+### Gradle Build Contract (`app/build.gradle.kts`)
 
 ~~~kotlin
 android {
@@ -788,17 +530,27 @@ android {
         applicationId = "io.github.taro902.isolationpolicy"
         minSdk = 29
         targetSdk = 36
-        versionCode = 4
-        versionName = "2.1.0"
+        versionCode = 5
+        versionName = "2.1.1"
     }
 
     buildFeatures {
         buildConfig = true
     }
 
-    lint {
-        checkReleaseBuilds = false
-        abortOnError = false
+    signingConfigs {
+        create("release") {
+            val ksPath = System.getenv("KEYSTORE_PATH")
+            if (!ksPath.isNullOrBlank()) {
+                storeFile = file(ksPath)
+                storePassword = System.getenv("KEYSTORE_PASS")
+                keyAlias = System.getenv("KEY_ALIAS") ?: "isolationpolicy"
+                keyPassword = System.getenv("KEYPASS")
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
     }
 }
 
@@ -813,43 +565,35 @@ dependencies {
 }
 ~~~
 
-### 8.9 Diff — Architectural Upgrade (`v2.0` to `v2.1.0`)
+### Xposed API 102 Descriptor (`META-INF/xposed/module.prop`) & ProGuard (`app/proguard-rules.pro`)
 
-~~~diff
---- a/app/src/main/resources/META-INF/xposed/java_init.list
-+++ b/app/src/main/resources/META-INF/xposed/java_init.list
--io.github.taro902.isolationpolicy.Entry
-+io.github.taro902.isolationpolicy.hook.Entry
-
---- a/app/src/main/java/io/github/taro902/isolationpolicy/hook/Entry.java
-+++ b/app/src/main/java/io/github/taro902/isolationpolicy/hook/Entry.java
-+    @Override
-+    public void onPackageLoaded(@NonNull PackageLoadedParam param) {
-+        if (systemServerMode && SETTINGS_PROVIDER_PKG.equals(param.getPackageName())) {
-+            settingsShield.attachIfNeeded(this, param.getDefaultClassLoader(), engine, telemetry);
-+        }
-+    }
-+
-+    @Override
-+    public void onPackageReady(@NonNull PackageReadyParam param) {
-+        if (systemServerMode && SETTINGS_PROVIDER_PKG.equals(param.getPackageName())) {
-+            settingsShield.attachIfNeeded(this, param.getClassLoader(), engine, telemetry);
-+        }
-+    }
+~~~properties
+minApiVersion=102
+targetApiVersion=102
+staticScope=true
+exceptionMode=protective
+autoHotReload=false
 ~~~
 
-### 8.10 JSON — `v2.1.0` Export Schema (Backward-Compatible with `v2.0`)
+~~~text
+-dontwarn io.github.libxposed.**
+-keep class io.github.taro902.isolationpolicy.hook.Entry { *; }
+-keep class io.github.libxposed.service.** { *; }
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
+~~~
+
+### Policy Export Format (`v2.1.1` — Backward-Compatible with `v2.0`)
 
 ~~~json
 {
   "schema": "isolpolicy",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "defaultAzMode": 0,
   "policies": {
     "id.dana": {
-      "flags": 62,
+      "flags": 58,
       "az": 2,
-      "iso": true,
+      "iso": false,
       "dev": true,
       "a11y": true,
       "pkg": true,
@@ -868,112 +612,44 @@ dependencies {
 }
 ~~~
 
-### 8.11 Properties & R8 Keep Rules
+### Manifest & Adaptive Vector Launcher (`app/src/main/AndroidManifest.xml`)
 
-~~~properties
-minApiVersion=102
-targetApiVersion=102
-staticScope=true
-exceptionMode=protective
-autoHotReload=false
+~~~xml
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <application
+        android:allowBackup="false"
+        android:description="@string/module_desc"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="false"
+        android:theme="@style/Theme.IsolPolicy.Pixel">
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
 ~~~
 
-~~~text
--dontwarn io.github.libxposed.**
--keep class io.github.taro902.isolationpolicy.hook.Entry { *; }
--keep class io.github.libxposed.service.** { *; }
--keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
-~~~
+### Modular 31-Class Java Layout
 
-### 8.12 YAML — Deterministic CI Pipeline Contract
-
-~~~yaml
-name: Build and Release IsolPolicy
-on:
-  push:
-    branches: [ main ]
-    tags: [ 'v*' ]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-      - run: ./gradlew assembleRelease assembleDebug
-~~~
-
-### 8.13 Python — Offline Policy Bitmask Auditor
-
-~~~python
-import json, sys
-
-def decode_flags(mask: int) -> dict:
-    az_names = {0: "OFF", 1: "AUTO", 2: "DOWNGRADE", 3: "HARD_DROP"}
-    return {
-        "hex": f"0x{mask & 0x7F:02X}",
-        "az": az_names[mask & 0x03],
-        "iso": bool(mask & 0x04),
-        "dev": bool(mask & 0x08),
-        "a11y": bool(mask & 0x10),
-        "pkg": bool(mask & 0x20),
-        "disp": bool(mask & 0x40),
-    }
-
-if __name__ == "__main__":
-    data = json.load(open(sys.argv[1], encoding="utf-8"))
-    for pkg, entry in sorted(data.get("policies", {}).items()):
-        print(pkg, decode_flags(entry["flags"]))
-~~~
-
-### 8.14 Bash — Post-Boot Runtime Verification Commands
-
-~~~bash
-su -c "dumpsys package io.github.taro902.isolationpolicy | grep -E 'versionName|versionCode|userId'"
-su -c "settings get global development_settings_enabled; settings get global adb_enabled"
-su -c "dumpsys activity processes | grep -E 'AppZygote|isolated'"
-~~~
-
-## 9. Procedural Canvas Console Architecture
-
-The management console (`io.github.taro902.isolationpolicy.ui.*`) removes Jetpack Compose, AppCompat, Material Components, and PNG asset bloat entirely. Every stepped 1-unit chamfer frame, 3D bevel, 8x8/10x10 bitmask glyph, oscilloscope bar column, and threat meter draws directly via custom hardware-accelerated `Canvas` views with **zero object allocations inside `onDraw()`**.
-
-### Dual High-Contrast Color Systems (`PixelTheme.java`)
-
-| Token Role | `OBSIDIAN PHOSPHOR` (Dark) | `PAPER LCD` (Light Daylight) | Semantic Role |
-| :--- | :---: | :---: | :--- |
-| Canvas / Panel | `#0D0F12` / `#14181F` | `#E6E4DA` / `#F2F0E8` | Base viewport & elevated deck |
-| Card / Active Card | `#1A2029` / `#212936` | `#F9F8F2` / `#ECEAD9` | Unprotected vs guarded package state |
-| Bevel Light / Dark | `#323C4D` / `#06080B` | `#FFFFFF` / `#B5B09E` | Mechanical 1-unit 3D stepped edge |
-| Primary / Muted Ink | `#E6ECF5` / `#5D6B80` | `#14181F` / `#6B7280` | Tabular monospace (`tnum`) typography |
-| Ok / Warn / Danger | `#4ADE80` / `#FBBF24` / `#F87171` | `#15803D` / `#B45309` / `#B91C1C` | Active shield / downgrade / drop or risk |
-| Info / Focus | `#38BDF8` / `#A78BFA` | `#0369A1` / `#6D28D9` | Telemetry / ISO / DISP / A11Y highlight |
-
-### Workspace Functional Matrix
-
-| Tab | Active Surface | 60 FPS SDM660 Frame-Budget Engineering |
-| :--- | :--- | :--- |
-| **`GUARD`** | Live daemon bar, 16-column `PixelScopeView`, 7-pillar counters, 80 ms debounced search, `ALL/THREATS/GUARDED/FINANCE/SYSTEM` filters, 6 one-tap granular chips (`AZ`, `ISO`, `DEV`, `A11Y`, `PKG`, `DISP`), `AppInspectorDialog`. | Partial `DiffUtil` payload rebind (`PAYLOAD_FLAGS`), 3-frame discrete scan-fill (90 ms), 4 MB bounded `PixelIconQuantizer` (`PIXEL-16` nearest-neighbor or `NATIVE`), flat View hierarchy. |
-| **`SCOPE`** | Live 7-bit Hook Health Matrix (`OK`/`FB`/`ER`), uptime/graph telemetry, per-pillar filter chips, `[LIVE/PAUSE]`, `[COPY LOG]`, `[PURGE]`, 64-event ring buffer viewer. | Polling executes solely during `onResume()` and cancels immediately on `onPause()` (`0%` background CPU & battery). |
-| **`RADAR`** | Offline `Self-Coherence Verifier` (`RUN TEST`: probes `XposedService`, Zero-Oracle IPC `PING`, active hook count, live host `DEV`/`ADB`/`A11Y` state) + Static Threat Surface index. | Zero `BlockedPrivateApi` reflection; streams Binary AXML via `AssetManager.openXmlResourceParser` and scans ZIP Central Directory headers without eMMC writes. |
-| **`VAULT`** | Batch presets (`BANK STRICT`, `WALLET/ALIPAY`, `AUDIT MAX`, `RESET ALL`), Clipboard & SAF `.json` Export/Import (`v2.0` backward-compatible), dual theme toggle, icon quantizer toggle, polling cadence, system app unlock. | Console resident RAM `< 28 MB`; Release APK footprint `419 KB` (R8 minified + resource shrunk). |
-
-## 10. Modular Dependency Map
-
-### Strict Acyclic Layer Contract (`26 Java Classes`)
-
-| Layer Package | File Count | Allowed Dependencies | Runtime Process |
+| Package | Files | Runtime Process | Responsibility |
 | :--- | :---: | :--- | :--- |
-| `core/` | `4` | Android Framework (`SparseIntArray`, `org.json`) only | Shared (`system_server` + Console) |
-| `hook/` | `10` | `core/`, `io.github.libxposed:api:102.0.0` | `system_server` ONLY (`UID 1000`) |
-| `radar/` | `2` | `core/`, Android public `AssetManager` / `ZipFile` / `ContentResolver` | Console App ONLY |
-| `ui/pixel/` | `7` | Android `Canvas`, `Paint`, `Drawable`, `LruCache` | Console App ONLY |
-| `ui/` | `3` | `core/`, `radar/`, `ui/pixel/`, `io.github.libxposed:service:102.0.0`, `recyclerview:1.4.0` | Console App ONLY |
+| `core/` | `4` | Shared | Bitmask contract, immutable snapshot, JSON/wire codec, zero-bytecode release logger |
+| `hook/` | `10` | `system_server` ONLY | `Entry`, `PolicyEngine`, `TelemetryHub`, and 7 server-side shields |
+| `radar/` | `2` | Console App | Binary AXML + ZIP ELF threat profiler and Zero-Oracle IPC client |
+| `ui/pixel/` | `12` | Console App | Procedural bitmap font, 9-slice chrome, Bayer dither, 3D keycaps, sprites, oscilloscope, dock |
+| `ui/` | `3` | Console App | `MainActivity` 4-tab controller, `AppPolicyAdapter`, `AppInspectorDialog` |
 
 <details>
-<summary><strong>Expand Complete 26-File Java &amp; Resource Tree</strong></summary>
+<summary><strong>Expand Complete 31-File Java &amp; Resource Tree</strong></summary>
 
 ~~~text
 app/src/main/
@@ -1003,12 +679,17 @@ app/src/main/
 │       ├── AppPolicyAdapter.java
 │       ├── MainActivity.java
 │       └── pixel/
-│           ├── PixelChipView.java
-│           ├── PixelDrawable.java
+│           ├── PixelChrome.java
+│           ├── PixelCounterStrip.java
+│           ├── PixelDockBar.java
+│           ├── PixelFont.java
 │           ├── PixelIconQuantizer.java
-│           ├── PixelIcons.java
+│           ├── PixelKeycapView.java
+│           ├── PixelPalette.java
 │           ├── PixelScopeView.java
-│           ├── PixelTheme.java
+│           ├── PixelSpriteAtlas.java
+│           ├── PixelTagBarView.java
+│           ├── PixelTextView.java
 │           └── PixelThreatBar.java
 ├── res/
 │   ├── drawable/
@@ -1031,64 +712,44 @@ app/src/main/
 
 </details>
 
-## 11. Failure-Mode and Effects Analysis
+## 9. Failure-Mode Analysis
 
-| ID | Failure Mode | Trigger Condition | Deterministic Mitigation in v2.1.0 |
-| :---: | :--- | :--- | :--- |
-| `F01` | `system_server` Deadlock | Calling `PackageManager` inside Binder hooks while `mLock` is held | Zero `PackageManager` calls in all 7 shields; 100% lock-free `AtomicReference<PolicySnapshot>` + `AtomicLongArray`. |
-| `F02` | WebView / Chrome Sandbox Crash | Stripping `FLAG_ISOLATED_PROCESS` on `BIND_EXTERNAL_SERVICE` | 6-gate filter in `IsolatedFoldShield` strictly ignores `FLAG_EXTERNAL_SERVICE`, `FLAG_USE_APP_ZYGOTE`, dynamic instances, and browser packages. |
-| `F03` | Silent `SettingsProvider` Miss | Hooking `SettingsProvider` only in `onSystemServerStarting` before APK load | Dual-Checkpoint `onPackageLoaded` + `onPackageReady` with idempotent `AtomicBoolean` CAS attachment guard. |
-| `F04` | Global `MemoryIntArray` Poisoning | Returning `_track_generation` inside spoofed `SettingsProvider.call()` bundle | Constructs fresh single-key `Bundle("value")` omitting all generation tracking keys. |
-| `F05` | Single-Column SQL Query Bypass | Querying `SettingsProvider.query()` with `projection = ["value"]` (no `name` column) | Infers target key from URI path segment or `selectionArgs` before building `MatrixCursor`. |
-| `F06` | Accessibility `ClassCastException` | Returning `List` on Android 13-16 where `ParceledListSlice` is required | Dynamically inspects `method.getReturnType()` at hook registration and builds `ParceledListSlice.emptyList()`. |
-| `F07` | Sticky `USB_STATE` Corruption | Mutating AOSP `mStickyBroadcasts` Intent instance in place | Allocates `new Intent(sticky)` clone before setting `adb=false`, preserving system USB MTP. |
-| `F08` | Multi-User UID Misattribution | Hardcoding single-user `uid` equality on work-profile / secondary users | Normalizes `appId = uid % 100000` consistently while storing full `isoUid` in `IdentityGraph`. |
-| `F09` | `system_server` ClassLoader Leak | Live hot-reloading of `system_server` classes on 4 GB RAM devices | `autoHotReload=false` in `module.prop`; live policy edits take effect in 0 ms via `PolicySnapshot` swap. |
-| `F10` | IPC Fingerprinting Oracle | Third-party detector probing `SettingsProvider.call("ISOLPOLICY_IPC_V21", ...)` | Strict `Binder.getCallingUid() == verifiedSelfAppId` check; unauthorized callers execute stock `chain.proceed()`. |
-
-## 12. Hardware Telemetry and Ecosystem Synergy
-
-### Verified Reference Hardware Telemetry (`Asus Zenfone Max Pro M2 / X01BD`)
-
-| Metric | Verified Measurement / Constraint | Engineering Rationale |
+| Failure Mode | Trigger | Mitigation in v2.1.1 |
 | :--- | :--- | :--- |
-| SoC &amp; Memory | SDM660 (Kryo 260), Adreno 512, 4 GB RAM (+ ~2 GB ZRAM), 64 GB eMMC 5.1 half-duplex | Strict memory budget & zero write amplification required |
-| OS &amp; Kernel | crDroid 10.1 (Android 14 / API 34), Kernel `4.19.304` non-GKI (No SUSFS / No KPM) | Full stealth operates cleanly in userspace + `system_server` |
-| Release APK Size | `419 KB` (R8 minified + resource shrunk + EC P-256 signed) | Zero Compose, zero AppCompat, zero Material, zero PNG bloat |
-| `system_server` RAM | `< 300 KB` (`2048 B` IdentityGraph + 64 pre-allocated Seqlock slots) | Zero GC allocations on non-guarded Binder fast paths |
-| `system_server` Disk I/O | `0 B/s` (`Logger` stripped to 0 bytecode on `BuildConfig.DEBUG == false`) | Protects eMMC 5.1 latency and eliminates Logcat leakage |
+| `system_server` Deadlock | Calling `PackageManager` inside Binder hooks | Zero `PackageManager` calls in all 7 shields; lock-free `AtomicReference` + `AtomicLongArray`. |
+| WebView / Chrome Sandbox Crash | Folding `FLAG_EXTERNAL_SERVICE` or browser sandboxes | 6-gate guard in `IsolatedFoldShield` + `SANDBOX` classification in `ManifestRadar`. |
+| Silent `SettingsProvider` Miss | Hooking only in `onSystemServerStarting` | Dual-Checkpoint `onPackageLoaded` + `onPackageReady` with idempotent `AtomicBoolean` CAS. |
+| `MemoryIntArray` Cache Poisoning | Returning `_track_generation` inside spoofed bundles | Fresh single-key `Bundle("value")` omitting generation metadata. |
+| Direct SQLite Cursor Bypass | Calling `SettingsProvider.query()` with single `"value"` column | Infers queried key from URI segments or `selectionArgs` before building `MatrixCursor`. |
+| Accessibility `ClassCastException` | Returning `List` where Android 13-16 expects `ParceledListSlice` | Dynamic `method.getReturnType()` inspection at hook registration. |
+| Sticky `USB_STATE` Corruption | Mutating system `mStickyBroadcasts` intent in place | Allocates `new Intent(sticky)` clone before setting `adb=false`, preserving MTP and Tethering. |
+| IPC Fingerprinting Oracle | Unauthorized app calling `ISOLPOLICY_IPC_V21` | Verifies `Binder.getCallingUid() == verifiedSelfAppId`; others pass directly to `chain.proceed()`. |
 
-### Orthogonal Stealth Stack Synergy Matrix
+## 10. Verification and License
 
-| Layer | Component | Authoritative Scope | Interaction with IsolPolicy v2.1.0 |
-| :--- | :--- | :--- | :--- |
-| Zygisk &amp; Main Unmount | ReZygisk `v1.0.0` + Treat Wheel `v0.0.11` | Primary process (`UID 10xxx`) mount &amp; maps cleanup | Direct synergy with Pillar 2 (`ISO-FOLD`) |
-| Package Visibility | HMA-OSS (`oss-175`) | App list hiding, activity launch guard, install source | Zero duplication; Pillar 6 closes `getChangedPackages` gap |
-| Hardware Attestation | AlwaysStrong [Inject] `v1.0.4` | KeyMint / Keybox / VBMeta digest alignment | Zero overlap (never touches `/data/adb/tricky_store/`) |
-| Overlay &amp; Network | mountify `v2.0.3` + PingPimp `v11.0` | Global OverlayFS &amp; network tuning | Zero global `umount`; WebUI binaries stay operational |
-| Window Security | Enable Screenshot `v5.0.1` | `WindowManagerService` `FLAG_SECURE` | Zero overlap; Pillar 7 filters virtual display IDs only |
+### Orthogonal Ecosystem Compatibility
 
-## 13. Build Verification and License
+| Layer | Component | Interaction with IsolPolicy v2.1.1 |
+| :--- | :--- | :--- |
+| Zygisk &amp; Primary Unmount | ReZygisk + Treat Wheel | Direct synergy with Pillar 1 (`AZ`) and Pillar 2 (`ISO`) |
+| Package List Hiding | HMA-OSS (`oss-175`) | Orthogonal; Pillar 6 adds `getChangedPackages` filtering |
+| Attestation &amp; VBMeta | AlwaysStrong [Inject] | Zero overlap (does not access `/data/adb/tricky_store/`) |
+| Overlay &amp; Network | mountify + PingPimp | Zero global `umount`, zero network permissions, zero sysctl writes |
+| Window Security | Enable Screenshot | Zero overlap; Pillar 7 filters virtual display IDs without touching `FLAG_SECURE` |
 
-> [!CAUTION]
-> **Mandatory CI Guardrails:** Keep `org.gradle.configuration-cache=false` in `gradle.properties`, keep `AarMetadata` disabled in `app/build.gradle.kts` (`service:102.0.0` vs `compileSdk=36`), do not add `compileOnly(androidx.annotation:1.9.1)` alongside `recyclerview:1.4.0`, and never call `.edit()` on `getRemotePreferences()` from inside `system_server`.
+### Post-Boot Verification Checklist
 
-### Post-Install & Post-Boot Verification Checklist
+1. Install signed `IsolPolicy-v2.1.1-release.apk` (verified by `apksigner verify` in CI with EC P-256 `v1/v2/v3`).
+2. Check `io.github.taro902.isolationpolicy` in **HMA-OSS Blacklist Template**.
+3. Enable **IsolPolicy** in **LSPosed (Vector)** with scope set exclusively to **System Framework (`system`)**.
+4. Reboot once, open **`RADAR`**, and tap **`RUN CHECK`** to verify `SERVICE: LSPosed API 102`, `IPC GATE: AUTHENTICATED v2.1.1`, and `HOOKS: 7 OF 7 ATTACHED`.
+5. Configure targets in **`GUARD`** (live in `0 ms`, no reboot required):
+   * **E-Wallet (`id.dana`):** `AZ:DOWN` + `DEV` + `A11Y` + `PKG` (`ISO: OFF`)
+   * **Banking (`OCTO`, `myBCA`, `BCA mobile`, `BRImo`, `Livin'`, `SeaBank`):** `AZ:DOWN` + `DEV` + `A11Y` + `PKG` + `DISP`
+   * **Browsers &amp; Chat (`Chrome`, `Brave`, `Firefox`, `WhatsApp`, `Telegram`, `Instagram`):** Keep **OFF** (automatically classified as `SANDBOX` and skipped by `AUTO BANK`).
 
-1. Install `IsolPolicy-v2.1.0-release.apk` (in-place upgrade over `v2.0` retains `io.github.taro902.isolationpolicy` preferences and migrates legacy v2.0 policies automatically).
-2. Confirm `io.github.taro902.isolationpolicy` is checked in the **HMA-OSS Blacklist Template**.
-3. Confirm **IsolPolicy** is enabled in **LSPosed (Vector)** with scope restricted strictly to **System Framework (`system`)**.
-4. Reboot once to attach all 7 `system_server` shields (`autoHotReload=false`).
-5. Open IsolPolicy, navigate to **`RADAR`**, and tap **`RUN TEST`** to verify:
-   * `XposedService : OK (LSPosed API 102)`
-   * `ZeroOracleIPC : AUTHENTICATED (v2.1.0)`
-   * `Active Hooks  : 7/7`
-6. Apply recommended presets in **`GUARD`** (applied atomically in 0 ms via lock-free snapshot swap, no reboot required):
-   * **E-Wallet / Alipay SDK (`id.dana`):** `WALLET/ALIPAY` (`0x3E` — `AZ:DOWN + ISO + DEV + A11Y + PKG`)
-   * **Banking (`myBCA`, `BCA mobile`, `OCTO Mobile`, `BRImo`, `Livin'`):** `BANK STRICT` (`0x7A` — `AZ:DOWN + DEV + A11Y + PKG + DISP`)
+### License &amp; Upstream Attribution
 
-### License & Upstream Attribution
+Distributed under the **Apache License 2.0**. License terms and modification disclosures pursuant to Section 4(b) and Section 6 are preserved in `LICENSE`, `NOTICE`, and inside the APK at `META-INF/LICENSE` and `META-INF/NOTICE`.
 
-Distributed under the **Apache License 2.0**. Complete license terms and modification disclosures pursuant to Section 4(b) and Section 6 are preserved in `LICENSE`, `NOTICE`, and embedded inside every compiled APK at `META-INF/LICENSE` and `META-INF/NOTICE`.
-
-Derived from upstream [MhmRdd/Isolation-Policy](https://github.com/MhmRdd/Isolation-Policy) and independently re-architected under namespace `io.github.taro902.isolationpolicy` for `libxposed` API 102 with 7 coherent server-side shields, a hardware-atomic `IdentityGraph`, Zero-Oracle Seqlock telemetry, and a procedural Canvas console.
+Derived from [MhmRdd/Isolation-Policy](https://github.com/MhmRdd/Isolation-Policy) and independently re-architected under namespace `io.github.taro902.isolationpolicy` for `libxposed` API 102.
