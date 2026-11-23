@@ -1,79 +1,37 @@
-## IsolPolicy v2.1.0 — 7-Pillar Server-Side Coherent Engine & Procedural Canvas Console
+### IsolPolicy v2.1.0
 
-Major architectural release re-engineering IsolPolicy from a single-pillar AppZygote hook (`v2.0`) into a **26-class modular, 7-pillar server-side stealth and telemetry architecture** targeting `libxposed` API 102 (`system_server` only, **0 bytes injected into target applications**).
+`versionCode 4` · `libxposed API 102` · `system_server` only (`0 bytes` target injection) · Verified `7/7` active hooks on Android 14 / Linux 4.19 non-SUSFS
 
-<table>
-  <thead>
-    <tr>
-      <th>Release Metadata</th>
-      <th>Architecture &amp; Footprint</th>
-      <th>Verified Runtime Telemetry (Android 14 / 4.19)</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><strong>Version:</strong> <code>2.1.0</code> (<code>versionCode = 4</code>)<br/><strong>Package:</strong> <code>io.github.taro902.isolationpolicy</code><br/><strong>API Contract:</strong> <code>libxposed:102.0.0</code></td>
-      <td><strong>Scope:</strong> <code>system</code> (<code>system_server</code> only)<br/><strong>App Injection:</strong> <code>0 bytes</code> (<code>autoHotReload=false</code>)<br/><strong>Release APK:</strong> <code>426 KB</code> (R8 + EC P-256 v1/v2/v3)</td>
-      <td><strong>XposedService:</strong> <code>OK (LSPosed API 102)</code><br/><strong>ZeroOracleIPC:</strong> <code>AUTHENTICATED (v2.1.0)</code><br/><strong>Active Hooks:</strong> <code>7/7</code> &middot; <code>&lt; 300 KB</code> RAM &middot; <code>0 B/s</code> Disk I/O</td>
-    </tr>
-  </tbody>
-</table>
+#### Upgrade from v2.0
+- Re-architected from a single-pillar `BindHook` (`v2.0`, ~305 KB) into a **26-class modular 7-pillar engine** (`core`, `hook`, `radar`, `ui`, `ui/pixel`) with `autoHotReload=false` and `< 300 KB` resident `system_server` overhead (`0 B/s` disk I/O).
+- Replaced per-record lookup with a lock-free `AtomicReference<PolicySnapshot>` (`0 ms` live policy swap, zero `PackageManager` locks) and a **2048 B hardware-atomic Reverse `IdentityGraph`** (`AtomicLongArray[256]`) mapping isolated/AppZygote UIDs (`90000-99999`) back to `ownerAppId` in `O(1)`.
+- Added cross-API state coherence across `SettingsProvider`, `ActivityManager`, `UsbService`, `AccessibilityManagerService`, `PackageManagerService`, and `DisplayManagerService`.
 
-> [!IMPORTANT]
-> **Zero Target Process Footprint:** Every shield executes exclusively inside `system_server` (`UID 1000`). No DEX classes, ART hook trampolines, or native libraries are loaded into banking, e-wallet, or detector processes. All non-guarded processes and privileged system UIDs (`appId < 10000`) bypass in a single integer comparison.
+#### 7-Pillar Server-Side Engine (`hook/`)
+- **`AZ` (`AppZygoteShield`):** 4-layer cross-thread Silent Downgrade (`mHostingZygote = 0`) / Hard Drop across `HostingRecord` and `ProcessList` (`startProcessLocked`, `startProcess`, `removeProcessNameLocked`) with `module.deoptimize()`, `ExceptionMode.PROTECTIVE`, and live `IdentityGraph` eviction.
+- **`ISO` (`IsolatedFoldShield`):** Opt-in folding of internal non-external `FLAG_ISOLATED_PROCESS` helpers (`UID 99000-99999`) into the package's Treat Wheel-cleaned `UID 10xxx` process, guarded by 6 strict anti-crash gates protecting WebView, Chrome, external services, and dynamic `bindIsolatedService`.
+- **`DEV` (`SettingsShield` + `UsbBroadcastShield`):** Dual-Checkpoint attachment (`onPackageLoaded` + `onPackageReady`) spoofing `GET_global` / `GET_secure` via clean single-key `Bundle("value")` (omitting `_track_generation` to prevent `MemoryIntArray` cache poisoning), sanitizing direct SQLite `SettingsProvider.query()` cursors (`MatrixCursor`, full and single-column projections), cloning sticky `ACTION_USB_STATE` (`adb=false`), and stripping `FUNCTION_ADB (1L)` in `UsbService` while preserving USB MTP and Tethering.
+- **`A11Y` (`AccessibilityShield` + `SettingsShield`):** Clears accessibility capability bits (`0x1B`) in the 64-bit `IntPair` returned by `AccessibilityManagerService.addClient()`, empties `getEnabledAccessibilityServiceList()` and `getInstalledAccessibilityServiceList()` (dynamically matching `ParceledListSlice` on Android 13-16 vs `List` on Android 10-12), and filters live push callbacks on `IAccessibilityManagerClient$Stub$Proxy.setState`.
+- **`PKG` (`PackageChangeShield`):** Returns `null` on Binder entrypoints (`IPackageManagerBase` / `PackageManagerService`) for `getChangedPackages()`, closing the post-boot package delta leak orthogonal to HMA-OSS.
+- **`DISP` (`DisplayShield`):** Projects `DisplayManagerService` to physical `Display.DEFAULT_DISPLAY (0)` only, hiding virtual/presentation displays without touching `FLAG_SECURE` (`Enable Screenshot` compatible).
+- **Telemetry (`TelemetryHub`):** 64-slot wait-free Seqlock ring buffer + 16-bit 7-pillar `HookHealthMask` exposed through an authenticated **Zero-Oracle IPC Gate** (`ISOLPOLICY_IPC_V21` — unauthorized UIDs fall through untouched to stock `chain.proceed()`).
 
-### What Changed from `v2.0` to `v2.1.0`
+#### Procedural Canvas Console & Static Radar (`ui/`, `radar/`)
+- **Zero-Bloat Procedural UI (`426 KB` Release APK):** Built purely on hardware-accelerated `Canvas` without Jetpack Compose, AppCompat, Material Components, or PNG assets; zero allocations in `onDraw()`, partial `DiffUtil` payload rebinding, and `onPause()` polling halt (`0%` background CPU).
+- **4 Functional Workspaces:** `GUARD` (16x8 `PixelScopeView` live oscilloscope, 6 granular 1-tap chips, 5-segment `PixelThreatBar`, `AppInspectorDialog`), `SCOPE` (7-bit Hook Health Matrix, live 64-event stream, copy/purge), `RADAR` (`Self-Coherence Verifier` `RUN TEST` + threat index), and `VAULT` (presets, dual themes `OBSIDIAN PHOSPHOR` / `PAPER LCD`, `PIXEL-16` / `NATIVE` icon quantizer, Clipboard & SAF `.json` Export/Import backward-compatible with `v2.0`).
+- **Offline `ManifestRadar`:** Binary AXML scanner (`AssetManager.openXmlResourceParser`, zero `BlockedPrivateApi`) + zero-extract ZIP Central Directory ELF classifier (`ALIPAY_APSE`, `PROMON_SHIELD`, `VKEY_VGUARD`, `APPSEALING`, `THREATMETRIX`, `DEXPROTECTOR`, `PACKER_GUARD`, `HARDENED_SDK`).
 
-| Area | IsolPolicy `v2.0` (`versionCode = 3`) | IsolPolicy `v2.1.0` (`versionCode = 4`) |
-| :--- | :--- | :--- |
-| **Codebase Structure** | Monolithic single-pillar `BindHook` | **26 modular Java classes** across 5 strict acyclic layers (`core`, `hook`, `radar`, `ui`, `ui/pixel`) |
-| **Process Isolation** | 4-layer AppZygote Silent Downgrade / Hard Drop | 4-layer AppZygote + **Pillar 2 Selective Non-External Isolated Folding** (6-gate WebView anti-crash protection) |
-| **Isolated UID Tracking** | `WeakHashMap` per `HostingRecord` | **2048 B Hardware-Atomic `IdentityGraph`** (`AtomicLongArray[256]`) mapping `UID 90000-99999` back to `ownerAppId` in `O(1)` |
-| **DevOpts / ADB / USB** | Not implemented | **Coherent 4-path projection:** `SettingsProvider.call()` (no `_track_generation`) + `SettingsProvider.query()` (`MatrixCursor`) + cloned sticky `USB_STATE` + `UsbService` `FUNCTION_ADB` mask |
-| **Accessibility Hiding** | Not implemented | **Coherent 5-path projection:** `Settings.Secure` + `AMS.addClient()` 64-bit `IntPair` strip (`0x1B`) + dynamic `ParceledListSlice`/`List` + live `setState` push suppressor |
-| **Package Delta &amp; Display** | Not implemented | **`getChangedPackages` nullifier** (orthogonal to HMA-OSS) + **Virtual/Presentation Display filter** (`displayId 0` only, zero overlap with `Enable Screenshot`) |
-| **Telemetry &amp; Diagnostics** | Silent release only | **64-slot Wait-Free Seqlock Ring Buffer** + **Zero-Oracle IPC Gate** + **16-bit 7-Pillar Hook Health Matrix** + `Self-Coherence Verifier` |
-| **Static Threat Scanner** | Binary AXML AppZygote check | Binary AXML + **Zero-Extract Native ELF Antifraud SDK Scanner** (8 SDK families) + deterministic `0-100` risk score |
-| **Management Console** | Basic list UI (~305 KB) | **Procedural 16-Bit Pixel Canvas Console** (`426 KB`, 4 tabs, Dual Themes, 16x8 live oscilloscope, `PIXEL-16`/`NATIVE` icons, zero Compose/AppCompat/PNG) |
+#### Fixes & CI Hardening
+- Fixed `PhoneWindow.getInsetsController()` NPE on Android 14 by invoking system bar styling after `setContentView()` via `decor.post(...)` and guarded `ExecutorService` calls during theme `recreate()`.
+- Restored EC P-256 release signing (`v1 + v2 + v3`) in `app/build.gradle.kts`, enforced mandatory `apksigner verify --verbose --print-certs` before release upload, and automated dynamic `versionName` resolution in `.github/workflows/build.yml`.
 
-### Seven-Pillar Server-Side Engine (`hook/`)
+#### Assets, Upgrade & Recommended Profiles
+- **`IsolPolicy-v2.1.0-release.apk` (`426 KB`):** Recommended production build (R8 minified, EC P-256 `v1/v2/v3` signed, `0` Logcat).
+- **`IsolPolicy-v2.1.0-debug.apk` (`6.63 MB`):** Unminified diagnostic build with debug logging enabled.
+- **Upgrade from `v2.0`:** Export JSON backup -> uninstall `v2.0` (ephemeral CI keystore) -> install `v2.1.0-release.apk` -> re-check `io.github.taro902.isolationpolicy` in **HMA-OSS Blacklist Template** -> enable in **LSPosed (Vector)** with scope `System Framework (system)` -> reboot -> verify `7/7` in `RADAR -> RUN TEST`.
+- **DANA (`id.dana`):** `AZ:DOWN` + `DEV` + `A11Y` + `PKG` (`ISO: OFF`, `DISP` optional).
+- **Banking (`OCTO`, `myBCA`, `BCA mobile`, `BRImo`, `Livin'`, `SeaBank`):** `AZ:DOWN` + `DEV` + `A11Y` + `PKG` + `DISP` (`ISO: OFF`).
+- **Audit Detectors:** `AZ:DOWN` + `ISO` + `DEV` + `A11Y` + `PKG` + `DISP`.
+- **Browsers & Chat/Social (`Chrome`, `Brave`, `Firefox`, `WhatsApp`, `Telegram`, `Instagram`):** Keep **all shields OFF** (avoid batch `+THREATS` on `v2.1.0`).
 
-1. **Pillar 1 — `AppZygoteShield` (`AZ: OFF / AUTO / DOWN / DROP`):** Preserves and strengthens the 4-layer cross-thread interception across `HostingRecord.byAppZygote`, `usesAppZygote`, `ProcessList.startProcessLocked`, and `ProcessList.startProcess` (`ActivityManager:procStart`) with `module.deoptimize()`, `ExceptionMode.PROTECTIVE`, and live `IdentityGraph` registration/eviction via `removeProcessNameLocked`.
-2. **Pillar 2 — `IsolatedFoldShield` (`ISO` — Opt-In):** Folds internal non-external `FLAG_ISOLATED_PROCESS` helpers (`UID 99000-99999`) into the package's primary `UID 10xxx` process (already unmounted by Treat Wheel) without requiring global `umount` of system module binaries. Protected by 6 strict safety gates blocking `FLAG_EXTERNAL_SERVICE`, `FLAG_USE_APP_ZYGOTE`, dynamic `bindIsolatedService`, and WebView/Chrome/GMS packages.
-3. **Pillar 3 — `SettingsShield` (`DEV` &amp; `A11Y` + Zero-Oracle IPC):** Attached via a **Dual-Checkpoint Idempotent Guard** (`onPackageLoaded` + `onPackageReady` for `com.android.providers.settings`). Spoofs `GET_global` and `GET_secure` returning a clean single-key `Bundle("value")` omitting `_track_generation` (preventing global `MemoryIntArray` cache poisoning), sanitizes direct SQLite `SettingsProvider.query()` cursors (both full and single-column projections), and hosts the authenticated `ISOLPOLICY_IPC_V21` gate (unauthorized UIDs fall through verbatim to stock `chain.proceed()`).
-4. **Pillar 4 — `UsbBroadcastShield` (`DEV`):** Clones sticky `android.hardware.usb.action.USB_STATE` (`new Intent(sticky)`) with `adb=false` without mutating system `mStickyBroadcasts`, and clears bit `0` (`FUNCTION_ADB = 1L`) in `UsbService.getCurrentFunctions()` and `isFunctionEnabled("adb")` while keeping USB MTP and USB Tethering intact.
-5. **Pillar 5 — `AccessibilityShield` (`A11Y`):** Clears accessibility capability bits (`0x1B`) from the 64-bit `IntPair` returned by `AccessibilityManagerService.addClient()`, empties `getEnabledAccessibilityServiceList()` and `getInstalledAccessibilityServiceList()` (dynamically returning `ParceledListSlice.emptyList()` on Android 13-16 or `Collections.emptyList()` on Android 10-12), and filters live push updates on `IAccessibilityManagerClient$Stub$Proxy.setState` via `WeakHashMap<IBinder, Integer>`.
-6. **Pillar 6 — `PackageChangeShield` (`PKG`):** Intercepts `getChangedPackages` at Binder entrypoints (`IPackageManagerBase`, `PackageManagerService$IPackageManagerImpl`, `PackageManagerService`, fallback `ComputerEngine`) returning `null` for guarded UIDs, closing the *Package Changes Since Boot* gap orthogonal to HMA-OSS.
-7. **Pillar 7 — `DisplayShield` (`DISP`):** Projects `DisplayManagerService$BinderService.getDisplayIds()` to physical `Display.DEFAULT_DISPLAY (0)` and returns `null` for non-zero virtual/presentation `getDisplayInfo()` queries without touching `WindowManagerService` or `FLAG_SECURE`.
-
-### Procedural Canvas Console, Radar & Stability Fixes
-
-* **4-Tab Procedural Canvas Interface (`GUARD`, `SCOPE`, `RADAR`, `VAULT`):** Hardware-accelerated custom `Canvas` engine with zero `onDraw()` allocations, partial `DiffUtil` payload rebinding, 16-column `PixelScopeView` live oscilloscope (polling halts completely on `onPause()`), 5-segment `PixelThreatBar`, `AppInspectorDialog`, and dual switchable palettes (`OBSIDIAN PHOSPHOR` dark / `PAPER LCD` daylight).
-* **`ManifestRadar` Offline Profiler:** Zero `BlockedPrivateApi` reflection (`AssetManager.openXmlResourceParser`) + zero-extract ZIP Central Directory ELF scanner classifying `ALIPAY_APSE`, `PROMON_SHIELD`, `VKEY_VGUARD`, `APPSEALING`, `THREATMETRIX`, `DEXPROTECTOR`, `PACKER_GUARD`, and `HARDENED_SDK`.
-* **Backward-Compatible JSON `v2.1.0` Backup:** Supports Clipboard and SAF `.json` Export/Import and automatically migrates legacy `v2.0` configurations.
-* **Android 14 Window &amp; Lifecycle Fixes:** Resolved `PhoneWindow.getInsetsController()` NPE by applying system bar appearance after `setContentView()` via `decor.post(...)` and guarded background `ExecutorService` submissions during theme `recreate()`.
-* **CI Signing &amp; Verification Hardening:** Restored EC P-256 signing (`v1 + v2 + v3`) in `app/build.gradle.kts`, enforced mandatory `apksigner verify --verbose --print-certs` before release upload, and automated dynamic `versionName` resolution in `.github/workflows/build.yml`.
-
-### Release Assets
-
-| Asset | Size | Purpose |
-| :--- | :---: | :--- |
-| `IsolPolicy-v2.1.0-release.apk` | `426 KB` | **Recommended production build.** R8 minified, resource-shrunk, EC P-256 (`v1/v2/v3`) signed, `Logger` stripped to 0 bytecode (0 Logcat). |
-| `IsolPolicy-v2.1.0-debug.apk` | `6.63 MB` | Unminified diagnostic build with `BuildConfig.DEBUG == true` logging enabled for troubleshooting. |
-
-### Upgrade, Installation & Recommended Profiles
-
-> [!NOTE]
-> **Upgrading from `v2.0`:** Because CI currently signs with an ephemeral EC P-256 keystore per build unless `SIGNING_KEYSTORE_B64` is configured, export your `v2.0` JSON backup to Clipboard, uninstall `v2.0`, install `IsolPolicy-v2.1.0-release.apk`, then re-check `io.github.taro902.isolationpolicy` in **HMA-OSS Blacklist Template** and activate it in **LSPosed (Vector)** with scope set exclusively to **System Framework (`system`)**.
-
-1. Reboot once after activating in LSPosed (Vector).
-2. Open IsolPolicy -> **`RADAR`** -> tap **`RUN TEST`** and confirm `XposedService: OK`, `ZeroOracleIPC: AUTHENTICATED (v2.1.0)`, and `Active Hooks: 7/7`.
-3. Configure shields selectively in **`GUARD`** (takes effect in `0 ms` without reboot; force-stop target app once if already running):
-   * **E-Wallet / Alipay SDK (`id.dana`):** `AZ:DOWN` + `DEV` + `A11Y` + `PKG` (`ISO: OFF`; `DISP` optional)
-   * **Banking (`myBCA`, `BCA mobile`, `OCTO Mobile`, `BRImo`, `Livin'`, `SeaBank`):** `AZ:DOWN` + `DEV` + `A11Y` + `PKG` + `DISP` (`ISO: OFF` unless isolated mount detection occurs)
-   * **Runtime Audit Detectors:** `AZ:DOWN` + `ISO` + `DEV` + `A11Y` + `PKG` + `DISP`
-   * **Browsers (`Chrome`, `Brave`, `Firefox`) &amp; Chat/Social (`WhatsApp`, `Telegram`, `Instagram`, `Facebook`):** Keep **all shields OFF** (their AppZygote/isolated processes are web/media sandboxes; avoid batch `+THREATS` on `v2.1.0`).
-
-### License & Attribution
-
-Licensed under the **Apache License 2.0** (`LICENSE` and `NOTICE` embedded at `META-INF/`). Derived from upstream [MhmRdd/Isolation-Policy](https://github.com/MhmRdd/Isolation-Policy) and independently re-architected under `io.github.taro902.isolationpolicy` for `libxposed` API 102.
+Licensed under **Apache-2.0** (`META-INF/LICENSE` & `META-INF/NOTICE` embedded). Derived from [MhmRdd/Isolation-Policy](https://github.com/MhmRdd/Isolation-Policy) under `io.github.taro902.isolationpolicy`.
