@@ -16,6 +16,16 @@ jobs:
       - name: Checkout Source
         uses: actions/checkout@v4
 
+      - name: Resolve Version Metadata
+        id: meta
+        run: |
+          ver=$(grep -oE 'versionName[[:space:]]*=[[:space:]]*"[^"]+"' app/build.gradle.kts | head -n 1 | cut -d'"' -f2)
+          if [ -z "$ver" ]; then
+            echo "Failed to resolve versionName from app/build.gradle.kts"
+            exit 1
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -30,51 +40,78 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Generate Signing Keystore
+      - name: Prepare Signing Keystore
+        env:
+          SIGNING_KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+          SIGNING_KEYSTORE_PASS: ${{ secrets.SIGNING_KEYSTORE_PASS }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASS: ${{ secrets.SIGNING_KEY_PASS }}
         run: |
-          keytool -genkeypair -v \
-            -keystore "$RUNNER_TEMP/release.jks" \
-            -alias isolationpolicy \
-            -keyalg EC \
-            -keysize 256 \
-            -validity 10000 \
-            -storepass IsolPolicy2026 \
-            -keypass IsolPolicy2026 \
-            -dname "CN=Android, OU=Android, O=Google Inc., L=Mountain View, ST=California, C=US"
-          echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-          echo "KEYSTORE_PASS=IsolPolicy2026" >> "$GITHUB_ENV"
-          echo "KEYPASS=IsolPolicy2026" >> "$GITHUB_ENV"
+          if [ -n "$SIGNING_KEYSTORE_B64" ]; then
+            printf '%s' "$SIGNING_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+            echo "KEYSTORE_PASS=${SIGNING_KEYSTORE_PASS:-IsolPolicy2026}" >> "$GITHUB_ENV"
+            echo "KEY_ALIAS=${SIGNING_KEY_ALIAS:-isolationpolicy}" >> "$GITHUB_ENV"
+            echo "KEYPASS=${SIGNING_KEY_PASS:-IsolPolicy2026}" >> "$GITHUB_ENV"
+          else
+            keytool -genkeypair -v \
+              -keystore "$RUNNER_TEMP/release.jks" \
+              -alias isolationpolicy \
+              -keyalg EC \
+              -keysize 256 \
+              -validity 10000 \
+              -storepass IsolPolicy2026 \
+              -keypass IsolPolicy2026 \
+              -dname "CN=Android, OU=Android, O=Google Inc., L=Mountain View, ST=California, C=US"
+            echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+            echo "KEYSTORE_PASS=IsolPolicy2026" >> "$GITHUB_ENV"
+            echo "KEY_ALIAS=isolationpolicy" >> "$GITHUB_ENV"
+            echo "KEYPASS=IsolPolicy2026" >> "$GITHUB_ENV"
+          fi
 
       - name: Assemble Release and Debug APKs
         run: |
           chmod +x ./gradlew
           ./gradlew :app:assembleRelease :app:assembleDebug --no-daemon
 
-      - name: Stage Compiled APKs
+      - name: Verify Signatures and Stage Compiled APKs
         id: stage
         run: |
-          rel=$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)
+          rel=$(find app/build/outputs/apk/release -name '*.apk' ! -name '*-unsigned.apk' | head -n 1)
           dbg=$(find app/build/outputs/apk/debug -name '*.apk' | head -n 1)
+          if [ -z "$rel" ] || [ ! -f "$rel" ]; then
+            echo "ERROR: Signed release APK not found!"
+            ls -la app/build/outputs/apk/release || true
+            exit 1
+          fi
+          apksigner_bin=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -name apksigner | sort -V | tail -n 1)
+          if [ -z "$apksigner_bin" ]; then
+            echo "ERROR: apksigner binary not found!"
+            exit 1
+          fi
+          "$apksigner_bin" verify --verbose --print-certs "$rel"
+          "$apksigner_bin" verify --verbose --print-certs "$dbg"
+          ver="${{ steps.meta.outputs.version }}"
           mkdir -p "$RUNNER_TEMP/out"
-          cp "$rel" "$RUNNER_TEMP/out/IsolPolicy-v2.1.0-release.apk"
-          cp "$dbg" "$RUNNER_TEMP/out/IsolPolicy-v2.1.0-debug.apk"
+          cp "$rel" "$RUNNER_TEMP/out/IsolPolicy-v${ver}-release.apk"
+          cp "$dbg" "$RUNNER_TEMP/out/IsolPolicy-v${ver}-debug.apk"
           {
-            echo "release=$RUNNER_TEMP/out/IsolPolicy-v2.1.0-release.apk"
-            echo "debug=$RUNNER_TEMP/out/IsolPolicy-v2.1.0-debug.apk"
+            echo "release=$RUNNER_TEMP/out/IsolPolicy-v${ver}-release.apk"
+            echo "debug=$RUNNER_TEMP/out/IsolPolicy-v${ver}-debug.apk"
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: IsolPolicy-v2.1.0
+          name: IsolPolicy-v${{ steps.meta.outputs.version }}
           path: ${{ runner.temp }}/out/*.apk
 
       - name: Publish to GitHub Releases
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2.6.2
         with:
-          tag_name: v2.1.0
-          name: IsolPolicy v2.1.0
+          tag_name: v${{ steps.meta.outputs.version }}
+          name: IsolPolicy v${{ steps.meta.outputs.version }}
           prerelease: false
           files: |
             ${{ steps.stage.outputs.release }}
