@@ -174,9 +174,9 @@ public final class MainActivity extends Activity {
         theme = new PixelTheme(this, themeMode);
         iconQuantizer = new PixelIconQuantizer();
 
-        applySystemBarColors();
         loadPoliciesFromAvailableStore();
         buildRootUi();
+        applySystemBarColors();
         registerXposedServiceSingleton();
         loadInstalledAppsAsync();
     }
@@ -206,6 +206,15 @@ public final class MainActivity extends Activity {
         bgExecutor.shutdownNow();
     }
 
+    private void runBg(Runnable task) {
+        if (!bgExecutor.isShutdown()) {
+            try {
+                bgExecutor.execute(task);
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
     private void applySystemBarColors() {
         Window w = getWindow();
         if (w == null) {
@@ -213,23 +222,31 @@ public final class MainActivity extends Activity {
         }
         w.setStatusBarColor(theme.bgCanvas);
         w.setNavigationBarColor(theme.bgPanel);
-        if (Build.VERSION.SDK_INT >= 30) {
-            WindowInsetsController ctrl = w.getInsetsController();
-            if (ctrl != null) {
-                int mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
-                        | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
-                ctrl.setSystemBarsAppearance(theme.isDark() ? 0 : mask, mask);
-            }
-        } else {
-            View decor = w.getDecorView();
-            int vis = decor.getSystemUiVisibility();
-            if (theme.isDark()) {
-                vis &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
-            } else {
-                vis |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
-            }
-            decor.setSystemUiVisibility(vis);
+        View decor = w.getDecorView();
+        if (decor == null) {
+            return;
         }
+        decor.post(() -> {
+            try {
+                if (Build.VERSION.SDK_INT >= 30) {
+                    WindowInsetsController ctrl = w.getInsetsController();
+                    if (ctrl != null) {
+                        int mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                                | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                        ctrl.setSystemBarsAppearance(theme.isDark() ? 0 : mask, mask);
+                    }
+                } else {
+                    int vis = decor.getSystemUiVisibility();
+                    if (theme.isDark()) {
+                        vis &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                    } else {
+                        vis |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                    }
+                    decor.setSystemUiVisibility(vis);
+                }
+            } catch (Throwable ignored) {
+            }
+        });
     }
 
     private static void registerXposedServiceSingleton() {
@@ -633,7 +650,7 @@ public final class MainActivity extends Activity {
 
         PixelChipView btnPurge = new PixelChipView(this, theme);
         btnPurge.applyState("PURGE", theme.chipOffBg, theme.accentDangerBg, theme.accentDanger, theme.accentDanger, true, false);
-        btnPurge.setOnClickListener(v -> bgExecutor.execute(() -> {
+        btnPurge.setOnClickListener(v -> runBg(() -> {
             boolean ok = TelemetryClient.purge(getApplicationContext());
             mainHandler.post(() -> {
                 scopeView.clear();
@@ -970,7 +987,6 @@ public final class MainActivity extends Activity {
         recInfo.setTextSize(10f);
         recInfo.setTextColor(theme.inkSecondary);
         recInfo.setText("ARCHITECTURE: 100% system_server only (0 bytes injected into target apps).\n"
-                + "RECOVERY: /data/adb/service.d/99_isolpolicy_watchdog.sh auto-removes /data/app/*/*taro902.isolationpolicy* if boot_completed > 90s.\n"
                 + "HMA-OSS: Keep io.github.taro902.isolationpolicy checked in Blacklist template.");
         recCard.addView(recInfo);
 
@@ -1088,7 +1104,7 @@ public final class MainActivity extends Activity {
 
     private void loadInstalledAppsAsync() {
         final boolean includeSys = showSystemApps;
-        bgExecutor.execute(() -> {
+        runBg(() -> {
             PackageManager pm = getPackageManager();
             List<PackageInfo> installed;
             try {
@@ -1250,7 +1266,7 @@ public final class MainActivity extends Activity {
     }
 
     private void pollTelemetryOnce() {
-        bgExecutor.execute(() -> {
+        runBg(() -> {
             TelemetryClient.SnapshotData snap = TelemetryClient.fetchSnapshot(getApplicationContext());
             mainHandler.post(() -> {
                 lastSnapshot = snap;
@@ -1432,7 +1448,7 @@ public final class MainActivity extends Activity {
         final int fApi = api;
         final String fFw = fw;
 
-        bgExecutor.execute(() -> {
+        runBg(() -> {
             TelemetryClient.DiagnosticResult d = TelemetryClient.runSelfDiagnostic(getApplicationContext(), svcOk, fApi, fFw);
             StringBuilder sb = new StringBuilder();
             sb.append("XposedService : ").append(d.serviceBound ? ("OK (" + d.serviceFw + " API " + d.serviceApi + ")") : "UNBOUND").append('\n');
