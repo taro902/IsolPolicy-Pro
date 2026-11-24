@@ -7,56 +7,50 @@ import android.view.View;
 
 public final class PixelTagBarView extends View {
 
-    private static final int MAX_TAGS = 5;
+    private static final int MAX_TAGS = 8;
 
-    private final PixelPalette pal;
-    private final Paint bgPaint = new Paint();
-    private final Paint borderPaint = new Paint();
-    private final Paint inkPaint = new Paint();
+    private final PixelMetrics m;
+    private final Paint paint = PixelDraw.newPixelPaint();
+    private final String[] labels = new String[MAX_TAGS];
+    private final int[] tones = new int[MAX_TAGS];
+    private PixelPalette palette;
+    private int count = 0;
 
-    private final String[] texts = new String[MAX_TAGS];
-    private final int[] bgs = new int[MAX_TAGS];
-    private final int[] borders = new int[MAX_TAGS];
-    private final int[] inks = new int[MAX_TAGS];
-    private int count;
+    public PixelTagBarView(Context ctx, PixelMetrics metrics, PixelPalette pal) {
+        super(ctx);
+        this.m = metrics;
+        this.palette = pal;
+    }
 
-    public PixelTagBarView(Context context, PixelPalette pal) {
-        super(context);
-        this.pal = pal;
-        bgPaint.setAntiAlias(false);
-        borderPaint.setAntiAlias(false);
-        inkPaint.setAntiAlias(false);
+    public void setPalette(PixelPalette pal) {
+        this.palette = pal;
+        invalidate();
     }
 
     public void clearTags() {
         count = 0;
+        invalidate();
     }
 
-    public void addTag(String label, int bg, int border, int ink) {
-        if (count >= MAX_TAGS || label == null || label.isEmpty()) {
+    public void addTag(String label, int tone) {
+        if (label == null || label.isEmpty() || count >= MAX_TAGS) {
             return;
         }
-        texts[count] = label;
-        bgs[count] = bg;
-        borders[count] = border;
-        inks[count] = ink;
+        labels[count] = label;
+        tones[count] = tone;
         count++;
+        invalidate();
     }
 
-    public void commitTags() {
-        requestLayout();
-        invalidate();
+    public int getTagCount() {
+        return count;
     }
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        int fs = pal.smallFontScale;
-        int u = pal.px;
-        int h = PixelFont.lineHeight(fs) + u * 4;
-        setMeasuredDimension(
-                MeasureSpec.getSize(widthMeasureSpec),
-                resolveSize(h, heightMeasureSpec)
-        );
+        int u = m.u;
+        int h = PixelFont.microHeight(m.microScale) + u * 4;
+        setMeasuredDimension(resolveSize(m.dp(240), widthMeasureSpec), resolveSize(h, heightMeasureSpec));
     }
 
     @Override
@@ -64,35 +58,54 @@ public final class PixelTagBarView extends View {
         if (count == 0) {
             return;
         }
-        int fs = pal.smallFontScale;
-        int u = pal.px;
+        int w = getWidth();
         int h = getHeight();
-        int maxW = getWidth();
-        int b = Math.max(2, u / 2);
+        int u = m.u;
+        int sc = m.microScale;
+        int th = PixelFont.microHeight(sc);
         int x = 0;
-        int gap = u * 2;
-        int padH = u * 2;
-        int th = PixelFont.lineHeight(fs);
-        float ty = (h - th) * 0.5f;
 
         for (int i = 0; i < count; i++) {
-            int tw = PixelFont.measureWidth(texts[i], fs);
-            int pillW = tw + padH * 2 + b * 2;
-            if (x > 0 && x + pillW > maxW) {
+            String lbl = labels[i];
+            int tw = PixelFont.measureMicroWidth(lbl, sc);
+            int chipW = tw + u * 4;
+            if (x + chipW > w) {
                 break;
             }
-            bgPaint.setColor(bgs[i]);
-            borderPaint.setColor(borders[i]);
-            inkPaint.setColor(inks[i]);
-
-            canvas.drawRect(x + b, 0, x + pillW - b, b, borderPaint);
-            canvas.drawRect(x + b, h - b, x + pillW - b, h, borderPaint);
-            canvas.drawRect(x, b, x + b, h - b, borderPaint);
-            canvas.drawRect(x + pillW - b, b, x + pillW, h - b, borderPaint);
-            canvas.drawRect(x + b, b, x + pillW - b, h - b, bgPaint);
-
-            PixelFont.draw(canvas, texts[i], x + b + padH, ty, fs, inkPaint);
-            x += pillW + gap;
+            int tone = tones[i];
+            int bg;
+            int fg;
+            int bdr;
+            switch (tone) {
+                case PixelBadgeView.TONE_ACCENT:
+                    bg = palette.accentDim;
+                    fg = palette.accent;
+                    bdr = palette.accent;
+                    break;
+                case PixelBadgeView.TONE_WARN:
+                    bg = palette.surfaceAlt;
+                    fg = palette.warn;
+                    bdr = palette.warn;
+                    break;
+                case PixelBadgeView.TONE_DANGER:
+                    bg = palette.surfaceAlt;
+                    fg = palette.danger;
+                    bdr = palette.danger;
+                    break;
+                case PixelBadgeView.TONE_AUDIT:
+                    bg = palette.surfaceAlt;
+                    fg = palette.audit;
+                    bdr = palette.audit;
+                    break;
+                default:
+                    bg = palette.well;
+                    fg = palette.inkMuted;
+                    bdr = palette.border;
+                    break;
+            }
+            PixelDraw.drawNotchedBox(canvas, x, 0, x + chipW, h, u, bg, bdr, paint);
+            PixelFont.drawMicro(canvas, lbl, x + u * 2, (h - th) / 2, sc, fg, paint);
+            x += chipW + u * 2;
         }
     }
 }

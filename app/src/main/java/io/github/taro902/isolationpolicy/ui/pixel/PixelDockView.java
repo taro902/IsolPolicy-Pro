@@ -1,0 +1,137 @@
+package io.github.taro902.isolationpolicy.ui.pixel;
+
+import android.content.Context;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.view.HapticFeedbackConstants;
+import android.view.MotionEvent;
+import android.view.View;
+
+public final class PixelDockView extends View {
+
+    public interface OnTabSelectedListener {
+        void onTabSelected(int tabIndex);
+    }
+
+    private static final String[] TAB_LABELS = {"GUARD", "SCOPE", "RADAR", "VAULT"};
+
+    private final PixelMetrics m;
+    private final Paint paint = PixelDraw.newPixelPaint();
+    private PixelPalette palette;
+    private OnTabSelectedListener listener;
+    private int activeTab = 0;
+    private boolean scopeHasEvents = false;
+
+    public PixelDockView(Context ctx, PixelMetrics metrics, PixelPalette pal) {
+        super(ctx);
+        this.m = metrics;
+        this.palette = pal;
+        setClickable(true);
+    }
+
+    public void setPalette(PixelPalette pal) {
+        this.palette = pal;
+        invalidate();
+    }
+
+    public void setOnTabSelectedListener(OnTabSelectedListener l) {
+        this.listener = l;
+    }
+
+    public void setActiveTab(int tab) {
+        int clamped = Math.max(0, Math.min(3, tab));
+        if (this.activeTab != clamped) {
+            this.activeTab = clamped;
+            invalidate();
+        }
+    }
+
+    public int getActiveTab() {
+        return activeTab;
+    }
+
+    public void setScopeHasEvents(boolean hasEvents) {
+        if (this.scopeHasEvents != hasEvents) {
+            this.scopeHasEvents = hasEvents;
+            invalidate();
+        }
+    }
+
+    @Override
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        int u = m.u;
+        int iconSz = 14 * Math.max(2, u - 1);
+        int h = iconSz + PixelFont.microHeight(m.microScale) + u * 8;
+        setMeasuredDimension(resolveSize(m.dp(360), widthMeasureSpec), resolveSize(h, heightMeasureSpec));
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+            int w = getWidth();
+            if (w > 0) {
+                int idx = Math.max(0, Math.min(3, (int) (event.getX() * 4f / w)));
+                if (PixelKeycapButton.isHapticsEnabled()) {
+                    try {
+                        performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                    } catch (Throwable ignored) {
+                    }
+                }
+                setActiveTab(idx);
+                if (listener != null) {
+                    listener.onTabSelected(idx);
+                }
+                return true;
+            }
+        }
+        return super.onTouchEvent(event);
+    }
+
+    @Override
+    protected void onDraw(Canvas canvas) {
+        int w = getWidth();
+        int h = getHeight();
+        int u = m.u;
+        if (w < u * 24 || h < u * 12) {
+            return;
+        }
+
+        paint.setColor(palette.surface);
+        canvas.drawRect(0, 0, w, h, paint);
+        PixelDraw.drawDivider(canvas, 0, 0, w, u, palette.border, paint);
+
+        int slotW = w / 4;
+        int iconScale = Math.max(2, u - 1);
+        int iconSz = 14 * iconScale;
+        int lblH = PixelFont.microHeight(m.microScale);
+
+        for (int i = 0; i < 4; i++) {
+            int left = i * slotW + u;
+            int right = (i == 3 ? w : (i + 1) * slotW) - u;
+            int top = u * 2;
+            int bottom = h - u;
+            boolean sel = (i == activeTab);
+
+            if (sel) {
+                PixelDraw.drawNotchedBox(canvas, left, top, right, bottom, u, palette.accentDim, palette.accent, paint);
+                paint.setColor(palette.accent);
+                canvas.drawRect(left + u * 2, 0, right - u * 2, u * 2, paint);
+            }
+
+            int totalH = iconSz + u + lblH;
+            int contentTop = top + (bottom - top - totalH) / 2;
+            int cx = left + (right - left) / 2;
+
+            int primary = sel ? palette.ink : palette.inkMuted;
+            int accent = sel ? palette.accent : palette.borderHi;
+            PixelSpriteAtlas.drawSprite(canvas, PixelSpriteAtlas.dockIcon(i), cx - iconSz / 2, contentTop, iconScale, primary, accent, paint);
+
+            if (i == 1 && scopeHasEvents) {
+                PixelDraw.drawLed(canvas, cx + iconSz / 2 + u, contentTop, u * 2, Math.max(1, u / 2), palette.accent, palette.border, paint);
+            }
+
+            int tw = PixelFont.measureMicroWidth(TAB_LABELS[i], m.microScale);
+            PixelFont.drawMicro(canvas, TAB_LABELS[i], cx - tw / 2, contentTop + iconSz + u, m.microScale, sel ? palette.accent : palette.inkMuted, paint);
+        }
+    }
+}

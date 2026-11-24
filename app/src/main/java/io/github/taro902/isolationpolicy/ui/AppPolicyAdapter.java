@@ -1,454 +1,629 @@
 package io.github.taro902.isolationpolicy.ui;
 
 import android.content.Context;
-import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.text.TextUtils;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.LruCache;
 import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
-import android.widget.HorizontalScrollView;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.TextView;
 
-import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.DiffUtil;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import io.github.taro902.isolationpolicy.core.PolicyFlags;
 import io.github.taro902.isolationpolicy.radar.ManifestRadar;
-import io.github.taro902.isolationpolicy.ui.pixel.PixelChrome;
-import io.github.taro902.isolationpolicy.ui.pixel.PixelIconQuantizer;
-import io.github.taro902.isolationpolicy.ui.pixel.PixelKeycapView;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelBadgeView;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelIconView;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelKeycapButton;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelMetrics;
 import io.github.taro902.isolationpolicy.ui.pixel.PixelPalette;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelPanelView;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelSpriteAtlas;
 import io.github.taro902.isolationpolicy.ui.pixel.PixelTagBarView;
-import io.github.taro902.isolationpolicy.ui.pixel.PixelThreatBar;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelTextView;
 
-public final class AppPolicyAdapter extends RecyclerView.Adapter<AppPolicyAdapter.Holder> {
+public final class AppPolicyAdapter extends RecyclerView.Adapter<AppPolicyAdapter.RowHolder> {
 
-    private static final String PAYLOAD_FLAGS = "FLAGS";
-    private static final String PAYLOAD_HITS = "HITS";
+    public static final String PAYLOAD_FLAGS = "flags";
+    public static final String PAYLOAD_HITS = "hits";
+    public static final String PAYLOAD_ICON = "icon";
 
-    private final PixelPalette pal;
-    private final PackageManager pm;
-    private final PixelIconQuantizer iconQuantizer;
-    private final ActionListener listener;
-    private final List<AppItem> items = new ArrayList<>();
-    private boolean pixelizeIcons;
+    private static final int ICON_CACHE_MAX_BYTES = 4 * 1024 * 1024;
+    private static final int NATIVE_ICON_PX = 64;
 
-    public AppPolicyAdapter(
-            PixelPalette pal,
-            PackageManager pm,
-            PixelIconQuantizer iconQuantizer,
-            boolean pixelizeIcons,
-            ActionListener listener
-    ) {
-        this.pal = pal;
-        this.pm = pm;
-        this.iconQuantizer = iconQuantizer;
-        this.pixelizeIcons = pixelizeIcons;
-        this.listener = listener;
-        setHasStableIds(true);
+    public interface OnAppActionListener {
+        void onFlagsUpdated(String packageName, int newFlags);
+        void onOpenInspector(AppRow row);
     }
 
-    public void setPixelizeIcons(boolean pixelize) {
-        if (this.pixelizeIcons != pixelize) {
-            this.pixelizeIcons = pixelize;
-            notifyItemRangeChanged(0, items.size());
+    public static final class IconPair {
+        public final Bitmap nativeBmp;
+        public final Bitmap pixelBmp;
+
+        public IconPair(Bitmap nativeBmp, Bitmap pixelBmp) {
+            this.nativeBmp = nativeBmp;
+            this.pixelBmp = pixelBmp;
         }
     }
 
-    public void submitList(List<AppItem> nextList) {
-        List<AppItem> copy = nextList != null ? new ArrayList<>(nextList) : new ArrayList<>();
+    public static final class AppRow {
+        public final String packageName;
+        public final String label;
+        public final int appId;
+        public final boolean isSystem;
+        public final int flags;
+        public final ManifestRadar.ScanReport report;
+        public final long totalHits;
+        public final long auditHits;
+        public final long[] pillarHits;
+
+        public AppRow(
+            String packageName,
+            String label,
+            int appId,
+            boolean isSystem,
+            int flags,
+            ManifestRadar.ScanReport report,
+            long totalHits,
+            long auditHits,
+            long[] pillarHits
+        ) {
+            this.packageName = packageName;
+            this.label = label != null ? label : packageName;
+            this.appId = appId;
+            this.isSystem = isSystem;
+            this.flags = PolicyFlags.sanitize(flags);
+            this.report = report;
+            this.totalHits = totalHits;
+            this.auditHits = auditHits;
+            this.pillarHits = pillarHits != null ? pillarHits : new long[PolicyFlags.PILLAR_COUNT];
+        }
+    }
+
+    private final PackageManager pm;
+    private final PixelMetrics m;
+    private PixelPalette palette;
+    private boolean pixelIcons;
+    private final OnAppActionListener listener;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final ExecutorService iconPool = Executors.newFixedThreadPool(2);
+    private final Set<String> pendingIcons = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
+    private final LruCache<String, IconPair> iconCache = new LruCache<String, IconPair>(ICON_CACHE_MAX_BYTES) {
+        @Override
+        protected int sizeOf(String key, IconPair value) {
+            int bytes = 0;
+            if (value != null && value.nativeBmp != null) {
+                bytes += value.nativeBmp.getByteCount();
+            }
+            if (value != null && value.pixelBmp != null) {
+                bytes += value.pixelBmp.getByteCount();
+            }
+            return Math.max(1024, bytes);
+        }
+    };
+
+    private List<AppRow> rows = new ArrayList<AppRow>();
+    private volatile boolean destroyed = false;
+
+    public AppPolicyAdapter(
+        Context ctx,
+        PixelMetrics metrics,
+        PixelPalette pal,
+        boolean usePixelIcons,
+        OnAppActionListener actionListener
+    ) {
+        this.pm = ctx.getPackageManager();
+        this.m = metrics;
+        this.palette = pal;
+        this.pixelIcons = usePixelIcons;
+        this.listener = actionListener;
+        setHasStableIds(true);
+    }
+
+    public void setPalette(PixelPalette pal) {
+        this.palette = pal;
+        notifyDataSetChanged();
+    }
+
+    public void setPixelIcons(boolean usePixel) {
+        if (this.pixelIcons != usePixel) {
+            this.pixelIcons = usePixel;
+            notifyDataSetChanged();
+        }
+    }
+
+    public IconPair getCachedIcon(String packageName) {
+        return packageName != null ? iconCache.get(packageName) : null;
+    }
+
+    public void submitList(final List<AppRow> nextList) {
+        final List<AppRow> oldList = this.rows;
+        final List<AppRow> safeNext = nextList != null ? nextList : Collections.<AppRow>emptyList();
         DiffUtil.DiffResult diff = DiffUtil.calculateDiff(new DiffUtil.Callback() {
             @Override
             public int getOldListSize() {
-                return items.size();
+                return oldList.size();
             }
 
             @Override
             public int getNewListSize() {
-                return copy.size();
+                return safeNext.size();
             }
 
             @Override
             public boolean areItemsTheSame(int oldPos, int newPos) {
-                return items.get(oldPos).packageName.equals(copy.get(newPos).packageName);
+                return oldList.get(oldPos).packageName.equals(safeNext.get(newPos).packageName);
             }
 
             @Override
             public boolean areContentsTheSame(int oldPos, int newPos) {
-                AppItem o = items.get(oldPos);
-                AppItem n = copy.get(newPos);
-                return o.flags == n.flags
-                        && o.liveHits == n.liveHits
-                        && o.report.threatScore == n.report.threatScore
-                        && o.report.isSandbox == n.report.isSandbox;
+                AppRow a = oldList.get(oldPos);
+                AppRow b = safeNext.get(newPos);
+                return a.flags == b.flags
+                    && a.totalHits == b.totalHits
+                    && a.auditHits == b.auditHits
+                    && Arrays.equals(a.pillarHits, b.pillarHits)
+                    && a.report == b.report;
             }
 
             @Override
             public Object getChangePayload(int oldPos, int newPos) {
-                AppItem o = items.get(oldPos);
-                AppItem n = copy.get(newPos);
-                if (o.flags != n.flags) {
+                AppRow a = oldList.get(oldPos);
+                AppRow b = safeNext.get(newPos);
+                if (a.flags != b.flags) {
                     return PAYLOAD_FLAGS;
                 }
-                if (o.liveHits != n.liveHits) {
+                if (a.totalHits != b.totalHits || a.auditHits != b.auditHits) {
                     return PAYLOAD_HITS;
                 }
                 return null;
             }
         });
-        items.clear();
-        items.addAll(copy);
+        this.rows = new ArrayList<AppRow>(safeNext);
         diff.dispatchUpdatesTo(this);
+    }
+
+    public void shutdown() {
+        destroyed = true;
+        iconPool.shutdownNow();
+        iconCache.evictAll();
     }
 
     @Override
     public long getItemId(int position) {
-        return items.get(position).packageName.hashCode();
+        return rows.get(position).packageName.hashCode();
     }
 
     @Override
     public int getItemCount() {
-        return items.size();
-    }
-
-    @NonNull
-    @Override
-    public Holder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        Context ctx = parent.getContext();
-        int u = pal.px;
-
-        LinearLayout card = new LinearLayout(ctx);
-        card.setOrientation(LinearLayout.VERTICAL);
-        RecyclerView.LayoutParams rootLp = new RecyclerView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        rootLp.setMargins(0, 0, 0, u * 3);
-        card.setLayoutParams(rootLp);
-
-        LinearLayout topRow = new LinearLayout(ctx);
-        topRow.setOrientation(LinearLayout.HORIZONTAL);
-        topRow.setGravity(Gravity.CENTER_VERTICAL);
-        card.addView(topRow, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        ));
-
-        LinearLayout iconBox = new LinearLayout(ctx);
-        iconBox.setGravity(Gravity.CENTER);
-        iconBox.setPadding(u * 2, u * 2, u * 2, u * 2);
-        iconBox.setBackground(PixelChrome.inset(pal));
-        int iconDim = pal.dp(36);
-        ImageView iconView = new ImageView(ctx);
-        iconView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        iconBox.addView(iconView, new LinearLayout.LayoutParams(iconDim, iconDim));
-        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        iconLp.setMarginEnd(u * 4);
-        topRow.addView(iconBox, iconLp);
-
-        LinearLayout metaCol = new LinearLayout(ctx);
-        metaCol.setOrientation(LinearLayout.VERTICAL);
-        topRow.addView(metaCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        LinearLayout titleLine = new LinearLayout(ctx);
-        titleLine.setOrientation(LinearLayout.HORIZONTAL);
-        titleLine.setGravity(Gravity.CENTER_VERTICAL);
-        metaCol.addView(titleLine, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        ));
-
-        TextView labelView = new TextView(ctx);
-        labelView.setTypeface(pal.monoBold);
-        labelView.setTextSize(13f);
-        labelView.setTextColor(pal.inkPrimary);
-        labelView.setSingleLine(true);
-        labelView.setEllipsize(TextUtils.TruncateAt.END);
-        titleLine.addView(labelView, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        PixelThreatBar threatBar = new PixelThreatBar(ctx, pal);
-        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        barLp.setMarginStart(u * 2);
-        titleLine.addView(threatBar, barLp);
-
-        TextView pkgView = new TextView(ctx);
-        pkgView.setTypeface(pal.monoRegular);
-        pkgView.setTextSize(10f);
-        pkgView.setTextColor(pal.inkSecondary);
-        pkgView.setSingleLine(true);
-        pkgView.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-        pkgView.setFontFeatureSettings("tnum");
-        metaCol.addView(pkgView, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        ));
-
-        PixelTagBarView tagBar = new PixelTagBarView(ctx, pal);
-        LinearLayout.LayoutParams tagLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        tagLp.topMargin = u * 2;
-        metaCol.addView(tagBar, tagLp);
-
-        HorizontalScrollView keyScroll = new HorizontalScrollView(ctx);
-        keyScroll.setHorizontalScrollBarEnabled(false);
-        keyScroll.setOverScrollMode(HorizontalScrollView.OVER_SCROLL_NEVER);
-        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        scrollLp.topMargin = u * 3;
-        card.addView(keyScroll, scrollLp);
-
-        LinearLayout keyRow = new LinearLayout(ctx);
-        keyRow.setOrientation(LinearLayout.HORIZONTAL);
-        keyRow.setGravity(Gravity.CENTER_VERTICAL);
-        keyScroll.addView(keyRow);
-
-        PixelKeycapView kAz = new PixelKeycapView(ctx, pal, true);
-        PixelKeycapView kIso = new PixelKeycapView(ctx, pal, true);
-        PixelKeycapView kDev = new PixelKeycapView(ctx, pal, true);
-        PixelKeycapView kA11y = new PixelKeycapView(ctx, pal, true);
-        PixelKeycapView kPkg = new PixelKeycapView(ctx, pal, true);
-        PixelKeycapView kDisp = new PixelKeycapView(ctx, pal, true);
-
-        PixelKeycapView[] keys = {kAz, kIso, kDev, kA11y, kPkg, kDisp};
-        for (int i = 0; i < keys.length; i++) {
-            keys[i].setSmallText(false);
-            LinearLayout.LayoutParams klp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-            );
-            if (i > 0) {
-                klp.setMarginStart(u * 2);
-            }
-            keyRow.addView(keys[i], klp);
-        }
-
-        return new Holder(card, topRow, iconView, labelView, pkgView, tagBar, threatBar,
-                kAz, kIso, kDev, kA11y, kPkg, kDisp);
+        return rows.size();
     }
 
     @Override
-    public void onBindViewHolder(@NonNull Holder h, int position) {
-        AppItem item = items.get(position);
-        h.labelView.setText(item.label);
-        h.pkgView.setText(item.packageName + "  u0_a" + Math.max(0, item.appId - 10000));
-        h.threatBar.setMetrics(item.report.threatScore, item.report.isSandbox, item.liveHits);
-
-        bindTags(h.tagBar, item.report);
-        iconQuantizer.loadInto(h.iconView, pm, item.applicationInfo, pixelizeIcons, pal.dp(36));
-
-        h.topRow.setOnClickListener(v -> {
-            int pos = h.getBindingAdapterPosition();
-            if (pos != RecyclerView.NO_POSITION) {
-                listener.onInspectRequested(items.get(pos));
-            }
-        });
-
-        bindKeycaps(h, item, false);
-        bindClicks(h);
+    public RowHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+        return new RowHolder(parent.getContext(), m, palette);
     }
 
     @Override
-    public void onBindViewHolder(@NonNull Holder h, int position, @NonNull List<Object> payloads) {
-        if (!payloads.isEmpty()) {
-            AppItem item = items.get(position);
-            if (payloads.contains(PAYLOAD_FLAGS)) {
-                bindKeycaps(h, item, true);
-            }
-            if (payloads.contains(PAYLOAD_HITS)) {
-                h.threatBar.setMetrics(item.report.threatScore, item.report.isSandbox, item.liveHits);
-            }
+    public void onBindViewHolder(RowHolder holder, int position) {
+        bindRow(holder, rows.get(position), null);
+    }
+
+    @Override
+    public void onBindViewHolder(RowHolder holder, int position, List<Object> payloads) {
+        if (payloads == null || payloads.isEmpty()) {
+            bindRow(holder, rows.get(position), null);
             return;
         }
-        onBindViewHolder(h, position);
+        bindRow(holder, rows.get(position), payloads);
     }
 
-    private void bindTags(PixelTagBarView bar, ManifestRadar.ScanReport r) {
-        bar.clearTags();
-        if (r.isSandbox) {
-            bar.addTag("SANDBOX", pal.bgInset, pal.outline, pal.inkMuted);
-            if (r.usesAppZygote) {
-                bar.addTag("WEB ZYGOTE", pal.bgInset, pal.outline, pal.inkMuted);
+    private void bindRow(final RowHolder h, final AppRow row, List<Object> payloads) {
+        h.boundPkg = row.packageName;
+        h.applyPalette(palette);
+        h.iconView.setPixelMode(pixelIcons);
+
+        boolean full = (payloads == null || payloads.isEmpty());
+        boolean updFlags = full || payloads.contains(PAYLOAD_FLAGS);
+        boolean updHits = full || payloads.contains(PAYLOAD_HITS) || payloads.contains(PAYLOAD_FLAGS);
+        boolean updIcon = full || payloads.contains(PAYLOAD_ICON);
+
+        if (full) {
+            h.nameText.setText(row.label.toUpperCase());
+            h.pkgText.setText(row.packageName);
+        }
+
+        if (updFlags) {
+            boolean active = PolicyFlags.isActive(row.flags);
+            boolean audit = PolicyFlags.isAuditOnly(row.flags);
+            h.panel.setHighlighted(active);
+            h.iconView.setGuardedBorder(active);
+
+            int az = PolicyFlags.azMode(row.flags);
+            h.btnAz.setLabel(az == PolicyFlags.AZ_OFF ? "AZ" : PolicyFlags.azLabel(az));
+            if (az == PolicyFlags.AZ_HARD_DROP) {
+                h.btnAz.setKeyState(PixelKeycapButton.STATE_DANGER);
+            } else if (az == PolicyFlags.AZ_DOWNGRADE) {
+                h.btnAz.setKeyState(PixelKeycapButton.STATE_ON);
+            } else if (az == PolicyFlags.AZ_AUTO) {
+                h.btnAz.setKeyState(PixelKeycapButton.STATE_WARN);
+            } else {
+                h.btnAz.setKeyState(PixelKeycapButton.STATE_OFF);
             }
-            if (!r.isolatedServices.isEmpty()) {
-                bar.addTag("ISO " + r.isolatedServices.size(), pal.bgInset, pal.outline, pal.inkMuted);
+
+            h.btnDev.setKeyState(PolicyFlags.hasFlag(row.flags, PolicyFlags.FLAG_DEV_COHERENT)
+                ? PixelKeycapButton.STATE_ON : PixelKeycapButton.STATE_OFF);
+            h.btnA11y.setKeyState(PolicyFlags.hasFlag(row.flags, PolicyFlags.FLAG_A11Y_COHERENT)
+                ? PixelKeycapButton.STATE_ON : PixelKeycapButton.STATE_OFF);
+            h.btnPkg.setKeyState(PolicyFlags.hasFlag(row.flags, PolicyFlags.FLAG_PKG_CHANGES)
+                ? PixelKeycapButton.STATE_ON : PixelKeycapButton.STATE_OFF);
+            h.btnAudit.setKeyState(audit ? PixelKeycapButton.STATE_AUDIT : PixelKeycapButton.STATE_OFF);
+
+            int extraCount = 0;
+            if (PolicyFlags.hasFlag(row.flags, PolicyFlags.FLAG_ISO_FOLD)) {
+                extraCount++;
             }
-            bar.commitTags();
-            return;
-        }
-        if (r.financeLikely) {
-            bar.addTag("FINANCE", pal.okBg, pal.ok, pal.ok);
-        }
-        if (r.usesAppZygote) {
-            bar.addTag("APPZYGOTE", pal.dangerBg, pal.danger, pal.danger);
-        }
-        if (!r.isolatedServices.isEmpty()) {
-            bar.addTag("ISO " + r.isolatedServices.size(), pal.warnBg, pal.warn, pal.warn);
-        }
-        for (String sdk : r.antifraudSdks) {
-            bar.addTag(sdk, pal.dangerBg, pal.danger, pal.danger);
-        }
-        if (!r.financeLikely && !r.usesAppZygote && r.isolatedServices.isEmpty() && r.antifraudSdks.isEmpty()) {
-            bar.addTag("CLEAN", pal.bgInset, pal.outline, pal.inkMuted);
-        }
-        bar.commitTags();
-    }
+            if (PolicyFlags.hasFlag(row.flags, PolicyFlags.FLAG_DISP_STEALTH)) {
+                extraCount++;
+            }
+            if (PolicyFlags.hasFlag(row.flags, PolicyFlags.FLAG_PROC_SURFACE)) {
+                extraCount++;
+            }
+            if (PolicyFlags.hasFlag(row.flags, PolicyFlags.FLAG_INPUT_SURFACE)) {
+                extraCount++;
+            }
+            if (PolicyFlags.hasFlag(row.flags, PolicyFlags.FLAG_OBS_COHERENCE)) {
+                extraCount++;
+            }
+            h.btnMore.setLabel(extraCount > 0 ? "+" + extraCount : "ALL");
+            h.btnMore.setKeyState(extraCount > 0 ? PixelKeycapButton.STATE_WARN : PixelKeycapButton.STATE_OFF);
 
-    private void bindKeycaps(Holder h, AppItem item, boolean animate) {
-        int fl = item.flags;
-        boolean guarded = PolicyFlags.isActive(fl);
-        int u = pal.px;
-        h.card.setBackground(PixelChrome.card(pal, guarded));
-        h.card.setPadding(guarded ? u * 8 : u * 4, u * 4, u * 5, u * 5);
-
-        int az = PolicyFlags.getAzMode(fl);
-        String azTxt = "AZ:" + PolicyFlags.azLabel(az);
-        if (az == PolicyFlags.AZ_HARD_DROP) {
-            h.kAz.applyAccent(azTxt, pal.danger, pal.dangerBg, pal.dangerLip, true, animate);
-        } else if (az == PolicyFlags.AZ_DOWNGRADE) {
-            h.kAz.applyAccent(azTxt, pal.ok, pal.okBg, pal.okLip, true, animate);
-        } else if (az == PolicyFlags.AZ_AUTO) {
-            h.kAz.applyAccent(azTxt, pal.warn, pal.warnBg, pal.warnLip, true, animate);
-        } else {
-            h.kAz.applyAccent(azTxt, pal.outline, pal.keyOffBg, pal.keyOffLip, false, false);
+            h.tagBar.clearTags();
+            if (row.report != null) {
+                if (row.report.isFinance()) {
+                    h.tagBar.addTag("FINANCE", PixelBadgeView.TONE_WARN);
+                } else if (row.report.isSandbox()) {
+                    h.tagBar.addTag("SANDBOX", PixelBadgeView.TONE_MUTED);
+                }
+                for (int i = 0; i < row.report.sdkTags.size() && i < 2; i++) {
+                    h.tagBar.addTag(row.report.sdkTags.get(i), PixelBadgeView.TONE_DANGER);
+                }
+                if (row.report.appZygoteServiceCount > 0) {
+                    h.tagBar.addTag("AZ:" + row.report.appZygoteServiceCount, PixelBadgeView.TONE_ACCENT);
+                }
+                if (row.report.isolatedServiceCount > 0) {
+                    h.tagBar.addTag("ISO:" + row.report.isolatedServiceCount, PixelBadgeView.TONE_MUTED);
+                }
+            }
+            if (audit && active) {
+                h.tagBar.addTag("DRY-RUN", PixelBadgeView.TONE_AUDIT);
+            } else if (active) {
+                h.tagBar.addTag(PolicyFlags.countActivePillars(row.flags) + "/10", PixelBadgeView.TONE_ACCENT);
+            }
         }
 
-        h.kIso.applyAccent("ISO", pal.info, pal.infoBg, pal.infoLip, PolicyFlags.has(fl, PolicyFlags.FLAG_ISO_FOLD), animate);
-        h.kDev.applyAccent("DEV", pal.ok, pal.okBg, pal.okLip, PolicyFlags.has(fl, PolicyFlags.FLAG_DEV_COHERENT), animate);
-        h.kA11y.applyAccent("A11Y", pal.focus, pal.focusBg, pal.focusLip, PolicyFlags.has(fl, PolicyFlags.FLAG_A11Y_COHERENT), animate);
-        h.kPkg.applyAccent("PKG", pal.warn, pal.warnBg, pal.warnLip, PolicyFlags.has(fl, PolicyFlags.FLAG_PKG_CHANGES), animate);
-        h.kDisp.applyAccent("DISP", pal.info, pal.infoBg, pal.infoLip, PolicyFlags.has(fl, PolicyFlags.FLAG_DISP_STEALTH), animate);
-    }
+        if (updHits) {
+            boolean active = PolicyFlags.isActive(row.flags);
+            boolean audit = PolicyFlags.isAuditOnly(row.flags);
+            if (row.totalHits > 0L) {
+                if (audit || (row.auditHits > 0L && row.auditHits >= row.totalHits)) {
+                    h.hitBadge.bind("AUD " + row.totalHits, PixelBadgeView.TONE_AUDIT, true);
+                } else {
+                    h.hitBadge.bind("HIT " + row.totalHits, PixelBadgeView.TONE_ACCENT, true);
+                }
+            } else if (active) {
+                h.hitBadge.bind(audit ? "AUDIT" : "ARMED", audit ? PixelBadgeView.TONE_AUDIT : PixelBadgeView.TONE_ACCENT, true);
+            } else {
+                h.hitBadge.bind("OFF", PixelBadgeView.TONE_MUTED, false);
+            }
+        }
 
-    private void bindClicks(Holder h) {
-        h.kAz.setOnClickListener(v -> {
-            int pos = h.getBindingAdapterPosition();
-            if (pos != RecyclerView.NO_POSITION) {
-                AppItem it = items.get(pos);
-                listener.onFlagsChanged(it.packageName, PolicyFlags.cycleAzMode(it.flags));
+        if (updIcon) {
+            IconPair pair = iconCache.get(row.packageName);
+            if (pair != null) {
+                h.iconView.setBitmaps(pair.nativeBmp, pair.pixelBmp);
+            } else {
+                h.iconView.setBitmaps(null, null);
+                loadIconAsync(row.packageName);
+            }
+        }
+
+        h.topArea.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (listener != null) {
+                    listener.onOpenInspector(row);
+                }
             }
         });
-        h.kIso.setOnClickListener(v -> toggleBitAt(h, PolicyFlags.FLAG_ISO_FOLD));
-        h.kDev.setOnClickListener(v -> toggleBitAt(h, PolicyFlags.FLAG_DEV_COHERENT));
-        h.kA11y.setOnClickListener(v -> toggleBitAt(h, PolicyFlags.FLAG_A11Y_COHERENT));
-        h.kPkg.setOnClickListener(v -> toggleBitAt(h, PolicyFlags.FLAG_PKG_CHANGES));
-        h.kDisp.setOnClickListener(v -> toggleBitAt(h, PolicyFlags.FLAG_DISP_STEALTH));
+        h.btnAz.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (listener != null) {
+                    int nextAz = (PolicyFlags.azMode(row.flags) + 1) & PolicyFlags.AZ_MASK;
+                    listener.onFlagsUpdated(row.packageName, PolicyFlags.withAzMode(row.flags, nextAz));
+                }
+            }
+        });
+        h.btnDev.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (listener != null) {
+                    listener.onFlagsUpdated(row.packageName, PolicyFlags.toggleFlag(row.flags, PolicyFlags.FLAG_DEV_COHERENT));
+                }
+            }
+        });
+        h.btnA11y.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (listener != null) {
+                    listener.onFlagsUpdated(row.packageName, PolicyFlags.toggleFlag(row.flags, PolicyFlags.FLAG_A11Y_COHERENT));
+                }
+            }
+        });
+        h.btnPkg.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (listener != null) {
+                    listener.onFlagsUpdated(row.packageName, PolicyFlags.toggleFlag(row.flags, PolicyFlags.FLAG_PKG_CHANGES));
+                }
+            }
+        });
+        h.btnAudit.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (listener != null) {
+                    int next = PolicyFlags.toggleFlag(row.flags, PolicyFlags.FLAG_AUDIT_ONLY);
+                    if (PolicyFlags.isAuditOnly(next) && !PolicyFlags.isActive(next)) {
+                        next = PolicyFlags.PRESET_AUDIT_BANK;
+                    }
+                    listener.onFlagsUpdated(row.packageName, next);
+                }
+            }
+        });
+        h.btnMore.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (listener != null) {
+                    listener.onOpenInspector(row);
+                }
+            }
+        });
     }
 
-    private void toggleBitAt(Holder h, int bit) {
-        int pos = h.getBindingAdapterPosition();
-        if (pos != RecyclerView.NO_POSITION) {
-            AppItem it = items.get(pos);
-            listener.onFlagsChanged(it.packageName, PolicyFlags.toggle(it.flags, bit));
+    private void loadIconAsync(final String packageName) {
+        if (destroyed || packageName == null || !pendingIcons.add(packageName)) {
+            return;
+        }
+        try {
+            iconPool.execute(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Drawable d = pm.getApplicationIcon(packageName);
+                        Bitmap nativeBmp = drawableToBitmap(d, NATIVE_ICON_PX);
+                        Bitmap pixelBmp = PixelIconView.quantizeTo16(nativeBmp);
+                        if (nativeBmp != null) {
+                            iconCache.put(packageName, new IconPair(nativeBmp, pixelBmp));
+                            if (!destroyed) {
+                                mainHandler.post(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        if (destroyed) {
+                                            return;
+                                        }
+                                        for (int i = 0; i < rows.size(); i++) {
+                                            if (packageName.equals(rows.get(i).packageName)) {
+                                                notifyItemChanged(i, PAYLOAD_ICON);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    } catch (Throwable ignored) {
+                    } finally {
+                        pendingIcons.remove(packageName);
+                    }
+                }
+            });
+        } catch (Throwable ignored) {
+            pendingIcons.remove(packageName);
         }
     }
 
-    public interface ActionListener {
-        void onFlagsChanged(String packageName, int newFlags);
-
-        void onInspectRequested(AppItem item);
-    }
-
-    public static final class AppItem {
-        public final String packageName;
-        public final String label;
-        public final int uid;
-        public final int appId;
-        public final boolean isSystem;
-        public final ApplicationInfo applicationInfo;
-        public final int flags;
-        public final int liveHits;
-        public final ManifestRadar.ScanReport report;
-
-        public AppItem(
-                String packageName,
-                String label,
-                int uid,
-                boolean isSystem,
-                ApplicationInfo applicationInfo,
-                int flags,
-                int liveHits,
-                ManifestRadar.ScanReport report
-        ) {
-            this.packageName = packageName;
-            this.label = label;
-            this.uid = uid;
-            this.appId = uid >= 10000 ? (uid % 100000) : uid;
-            this.isSystem = isSystem;
-            this.applicationInfo = applicationInfo;
-            this.flags = flags;
-            this.liveHits = Math.max(0, liveHits);
-            this.report = report != null ? report : ManifestRadar.ScanReport.EMPTY;
+    private static Bitmap drawableToBitmap(Drawable d, int sizePx) {
+        if (d == null) {
+            return null;
         }
-
-        public AppItem withFlags(int nextFlags) {
-            return new AppItem(packageName, label, uid, isSystem, applicationInfo, nextFlags, liveHits, report);
-        }
-
-        public AppItem withHits(int nextHits) {
-            return new AppItem(packageName, label, uid, isSystem, applicationInfo, flags, nextHits, report);
+        try {
+            if (d instanceof BitmapDrawable) {
+                Bitmap src = ((BitmapDrawable) d).getBitmap();
+                if (src != null && !src.isRecycled()) {
+                    if (src.getWidth() <= sizePx && src.getHeight() <= sizePx) {
+                        return src;
+                    }
+                    return Bitmap.createScaledBitmap(src, sizePx, sizePx, true);
+                }
+            }
+            Bitmap out = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(out);
+            d.setBounds(0, 0, sizePx, sizePx);
+            d.draw(c);
+            return out;
+        } catch (Throwable ignored) {
+            return null;
         }
     }
 
-    static final class Holder extends RecyclerView.ViewHolder {
-        final LinearLayout card;
-        final LinearLayout topRow;
-        final ImageView iconView;
-        final TextView labelView;
-        final TextView pkgView;
+    public static final class RowHolder extends RecyclerView.ViewHolder {
+        final PixelPanelView panel;
+        final LinearLayout topArea;
+        final PixelIconView iconView;
+        final PixelTextView nameText;
+        final PixelTextView pkgText;
+        final PixelBadgeView hitBadge;
         final PixelTagBarView tagBar;
-        final PixelThreatBar threatBar;
-        final PixelKeycapView kAz;
-        final PixelKeycapView kIso;
-        final PixelKeycapView kDev;
-        final PixelKeycapView kA11y;
-        final PixelKeycapView kPkg;
-        final PixelKeycapView kDisp;
+        final PixelKeycapButton btnAz;
+        final PixelKeycapButton btnDev;
+        final PixelKeycapButton btnA11y;
+        final PixelKeycapButton btnPkg;
+        final PixelKeycapButton btnAudit;
+        final PixelKeycapButton btnMore;
+        String boundPkg = "";
 
-        Holder(
-                LinearLayout card,
-                LinearLayout topRow,
-                ImageView iconView,
-                TextView labelView,
-                TextView pkgView,
-                PixelTagBarView tagBar,
-                PixelThreatBar threatBar,
-                PixelKeycapView kAz,
-                PixelKeycapView kIso,
-                PixelKeycapView kDev,
-                PixelKeycapView kA11y,
-                PixelKeycapView kPkg,
-                PixelKeycapView kDisp
+        RowHolder(Context ctx, PixelMetrics m, PixelPalette pal) {
+            super(createOuter(ctx, m));
+            LinearLayout outer = (LinearLayout) itemView;
+            int u = m.u;
+
+            panel = new PixelPanelView(ctx, m, pal);
+            outer.addView(panel, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ));
+
+            topArea = new LinearLayout(ctx);
+            topArea.setOrientation(LinearLayout.HORIZONTAL);
+            topArea.setGravity(Gravity.CENTER_VERTICAL);
+            panel.addView(topArea, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ));
+
+            iconView = new PixelIconView(ctx, m, pal);
+            int iconPx = m.dp(42);
+            LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(iconPx, iconPx);
+            iconLp.rightMargin = u * 3;
+            topArea.addView(iconView, iconLp);
+
+            LinearLayout titleCol = new LinearLayout(ctx);
+            titleCol.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            titleLp.rightMargin = u * 2;
+            topArea.addView(titleCol, titleLp);
+
+            nameText = new PixelTextView(ctx, m, pal);
+            nameText.setScale(m.fontScale);
+            nameText.setColorRole(PixelTextView.ROLE_INK);
+            titleCol.addView(nameText, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ));
+
+            pkgText = new PixelTextView(ctx, m, pal);
+            pkgText.setMicroMode(true);
+            pkgText.setScale(m.microScale);
+            pkgText.setColorRole(PixelTextView.ROLE_MUTED);
+            LinearLayout.LayoutParams pkgLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            );
+            pkgLp.topMargin = u * 2;
+            titleCol.addView(pkgText, pkgLp);
+
+            hitBadge = new PixelBadgeView(ctx, m, pal);
+            hitBadge.setMicro(true);
+            topArea.addView(hitBadge, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ));
+
+            tagBar = new PixelTagBarView(ctx, m, pal);
+            LinearLayout.LayoutParams tagLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            );
+            tagLp.topMargin = u * 2;
+            panel.addView(tagBar, tagLp);
+
+            LinearLayout keyRow = new LinearLayout(ctx);
+            keyRow.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout.LayoutParams keyRowLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            );
+            keyRowLp.topMargin = u * 3;
+            panel.addView(keyRow, keyRowLp);
+
+            btnAz = createRowKey(ctx, m, pal, "AZ", null, true);
+            btnDev = createRowKey(ctx, m, pal, "DEV", null, true);
+            btnA11y = createRowKey(ctx, m, pal, "A11Y", null, true);
+            btnPkg = createRowKey(ctx, m, pal, "PKG", null, true);
+            btnAudit = createRowKey(ctx, m, pal, "AUD", null, true);
+            btnMore = createRowKey(ctx, m, pal, "ALL", PixelSpriteAtlas.CTRL_MORE, false);
+
+            keyRow.addView(btnAz);
+            keyRow.addView(btnDev);
+            keyRow.addView(btnA11y);
+            keyRow.addView(btnPkg);
+            keyRow.addView(btnAudit);
+            keyRow.addView(btnMore);
+        }
+
+        void applyPalette(PixelPalette pal) {
+            panel.setPalette(pal);
+            iconView.setPalette(pal);
+            nameText.setPalette(pal);
+            pkgText.setPalette(pal);
+            hitBadge.setPalette(pal);
+            tagBar.setPalette(pal);
+            btnAz.setPalette(pal);
+            btnDev.setPalette(pal);
+            btnA11y.setPalette(pal);
+            btnPkg.setPalette(pal);
+            btnAudit.setPalette(pal);
+            btnMore.setPalette(pal);
+        }
+
+        private static LinearLayout createOuter(Context ctx, PixelMetrics m) {
+            LinearLayout outer = new LinearLayout(ctx);
+            outer.setOrientation(LinearLayout.VERTICAL);
+            outer.setLayoutParams(new RecyclerView.LayoutParams(
+                RecyclerView.LayoutParams.MATCH_PARENT,
+                RecyclerView.LayoutParams.WRAP_CONTENT
+            ));
+            outer.setPadding(m.u * 3, m.u * 2, m.u * 3, m.u * 2);
+            return outer;
+        }
+
+        private static PixelKeycapButton createRowKey(
+            Context ctx,
+            PixelMetrics m,
+            PixelPalette pal,
+            String label,
+            String[] icon,
+            boolean rightGap
         ) {
-            super(card);
-            this.card = card;
-            this.topRow = topRow;
-            this.iconView = iconView;
-            this.labelView = labelView;
-            this.pkgView = pkgView;
-            this.tagBar = tagBar;
-            this.threatBar = threatBar;
-            this.kAz = kAz;
-            this.kIso = kIso;
-            this.kDev = kDev;
-            this.kA11y = kA11y;
-            this.kPkg = kPkg;
-            this.kDisp = kDisp;
+            PixelKeycapButton b = new PixelKeycapButton(ctx, m, pal);
+            b.setCompact(true);
+            b.setLabel(label);
+            if (icon != null) {
+                b.setIconSprite(icon);
+            }
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            if (rightGap) {
+                lp.rightMargin = m.u * 2;
+            }
+            b.setLayoutParams(lp);
+            return b;
         }
     }
 }

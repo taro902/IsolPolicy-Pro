@@ -1,332 +1,383 @@
 package io.github.taro902.isolationpolicy.ui;
 
-import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.Context;
-import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.TextView;
-
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Locale;
 
 import io.github.taro902.isolationpolicy.core.PolicyFlags;
 import io.github.taro902.isolationpolicy.radar.ManifestRadar;
-import io.github.taro902.isolationpolicy.radar.TelemetryClient;
-import io.github.taro902.isolationpolicy.ui.pixel.PixelChrome;
-import io.github.taro902.isolationpolicy.ui.pixel.PixelKeycapView;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelAppHeatmapBar;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelBadgeView;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelIconView;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelKeycapButton;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelMetrics;
 import io.github.taro902.isolationpolicy.ui.pixel.PixelPalette;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelPanelView;
 import io.github.taro902.isolationpolicy.ui.pixel.PixelSpriteAtlas;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelTagBarView;
 import io.github.taro902.isolationpolicy.ui.pixel.PixelTextView;
 
 public final class AppInspectorDialog {
+
+    public interface OnFlagsChangedListener {
+        void onFlagsChanged(String packageName, int newFlags);
+    }
 
     private AppInspectorDialog() {
     }
 
     public static void show(
-            Context context,
-            PixelPalette pal,
-            AppPolicyAdapter.AppItem item,
-            TelemetryClient.SnapshotData snapshot,
-            PresetCallback callback
+        Context ctx,
+        final PixelMetrics m,
+        final PixelPalette pal,
+        final AppPolicyAdapter.AppRow row,
+        AppPolicyAdapter.IconPair iconPair,
+        boolean usePixelIcons,
+        final OnFlagsChangedListener listener
     ) {
-        int u = pal.px;
-        final int[] liveFlags = {item.flags};
+        if (ctx == null || row == null) {
+            return;
+        }
+        final Dialog dialog = new Dialog(ctx);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        final int[] currentFlags = new int[]{row.flags};
 
-        LinearLayout root = new LinearLayout(context);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackground(PixelChrome.modal(pal));
-        root.setPadding(u * 4, u * 4, u * 5, u * 5);
+        ScrollView scroll = new ScrollView(ctx);
+        scroll.setFillViewport(true);
+        scroll.setPadding(m.u * 4, m.u * 4, m.u * 4, m.u * 4);
 
-        LinearLayout titleBar = new LinearLayout(context);
-        titleBar.setOrientation(LinearLayout.HORIZONTAL);
-        titleBar.setGravity(Gravity.CENTER_VERTICAL);
-        titleBar.setBackground(PixelChrome.ditherBar(pal));
-        titleBar.setPadding(u * 4, u * 3, u * 3, u * 3);
-        root.addView(titleBar, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
+        final PixelPanelView root = new PixelPanelView(ctx, m, pal);
+        root.setHeader("APP INSPECTOR", PolicyFlags.formatMaskHex(currentFlags[0]));
+        scroll.addView(root, new ScrollView.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
         ));
 
-        PixelTextView titleTxt = new PixelTextView(context, "PACKAGE INSPECTOR", pal.ok, pal.fontScale);
-        titleTxt.setLed(true, pal.ok, pal.ledSpec);
-        titleBar.addView(titleTxt, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        int u = m.u;
 
-        ImageView closeBtn = new ImageView(context);
-        closeBtn.setImageDrawable(PixelSpriteAtlas.createDrawable(
-                context.getResources(),
-                PixelSpriteAtlas.CLOSE_7,
-                Math.max(2, pal.smallFontScale),
-                pal.danger,
-                pal.danger,
-                pal.outline
+        LinearLayout hdr = new LinearLayout(ctx);
+        hdr.setOrientation(LinearLayout.HORIZONTAL);
+        hdr.setGravity(Gravity.CENTER_VERTICAL);
+        root.addView(hdr, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
         ));
-        closeBtn.setPadding(u * 3, u * 3, u * 3, u * 3);
-        closeBtn.setBackground(PixelChrome.inset(pal));
-        titleBar.addView(closeBtn);
 
-        TextView appTitle = new TextView(context);
-        appTitle.setTypeface(pal.monoBold);
-        appTitle.setTextSize(13.5f);
-        appTitle.setTextColor(pal.inkPrimary);
-        appTitle.setText(item.label);
-        LinearLayout.LayoutParams atLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
+        final PixelIconView iconView = new PixelIconView(ctx, m, pal);
+        iconView.setPixelMode(usePixelIcons);
+        iconView.setGuardedBorder(PolicyFlags.isActive(currentFlags[0]));
+        if (iconPair != null) {
+            iconView.setBitmaps(iconPair.nativeBmp, iconPair.pixelBmp);
+        }
+        int iconSz = m.dp(48);
+        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(iconSz, iconSz);
+        iconLp.rightMargin = u * 3;
+        hdr.addView(iconView, iconLp);
+
+        LinearLayout infoCol = new LinearLayout(ctx);
+        infoCol.setOrientation(LinearLayout.VERTICAL);
+        hdr.addView(infoCol, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        PixelTextView titleTxt = new PixelTextView(ctx, m, pal);
+        titleTxt.setScale(m.fontScale);
+        titleTxt.setText(row.label.toUpperCase());
+        infoCol.addView(titleTxt, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ));
+
+        PixelTextView pkgTxt = new PixelTextView(ctx, m, pal);
+        pkgTxt.setMicroMode(true);
+        pkgTxt.setScale(m.microScale);
+        pkgTxt.setColorRole(PixelTextView.ROLE_MUTED);
+        pkgTxt.setText(row.packageName);
+        LinearLayout.LayoutParams pkgLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
         );
-        atLp.topMargin = u * 3;
-        root.addView(appTitle, atLp);
+        pkgLp.topMargin = u * 2;
+        infoCol.addView(pkgTxt, pkgLp);
 
-        TextView sub = new TextView(context);
-        sub.setTypeface(pal.monoRegular);
-        sub.setTextSize(10f);
-        sub.setTextColor(pal.inkSecondary);
-        sub.setFontFeatureSettings("tnum");
-        sub.setText(item.packageName + "\nUID " + item.uid + "  APPID " + item.appId
-                + "  MASK 0x" + Integer.toHexString(item.flags).toUpperCase(Locale.ROOT)
-                + "  SCORE " + item.report.threatScore + "/100");
-        LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
+        final PixelTextView metaTxt = new PixelTextView(ctx, m, pal);
+        metaTxt.setMicroMode(true);
+        metaTxt.setScale(m.microScale);
+        metaTxt.setColorRole(PixelTextView.ROLE_ACCENT);
+        LinearLayout.LayoutParams metaLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
         );
-        subLp.topMargin = u;
-        root.addView(sub, subLp);
+        metaLp.topMargin = u * 2;
+        infoCol.addView(metaTxt, metaLp);
 
-        LinearLayout liveRow1 = new LinearLayout(context);
-        liveRow1.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams lr1 = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        lr1.topMargin = u * 3;
-        root.addView(liveRow1, lr1);
-
-        LinearLayout liveRow2 = new LinearLayout(context);
-        liveRow2.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams lr2 = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        lr2.topMargin = u * 2;
-        root.addView(liveRow2, lr2);
-
-        PixelKeycapView kAz = new PixelKeycapView(context, pal, true);
-        PixelKeycapView kIso = new PixelKeycapView(context, pal, true);
-        PixelKeycapView kDev = new PixelKeycapView(context, pal, true);
-        PixelKeycapView kA11y = new PixelKeycapView(context, pal, true);
-        PixelKeycapView kPkg = new PixelKeycapView(context, pal, true);
-        PixelKeycapView kDisp = new PixelKeycapView(context, pal, true);
-
-        addWeighted(liveRow1, kAz, 0);
-        addWeighted(liveRow1, kIso, u * 2);
-        addWeighted(liveRow1, kDev, u * 2);
-        addWeighted(liveRow2, kA11y, 0);
-        addWeighted(liveRow2, kPkg, u * 2);
-        addWeighted(liveRow2, kDisp, u * 2);
-
-        Runnable syncKeys = () -> {
-            int fl = liveFlags[0];
-            int az = PolicyFlags.getAzMode(fl);
-            String azTxt = "AZ:" + PolicyFlags.azLabel(az);
-            if (az == PolicyFlags.AZ_HARD_DROP) {
-                kAz.applyAccent(azTxt, pal.danger, pal.dangerBg, pal.dangerLip, true, true);
-            } else if (az == PolicyFlags.AZ_DOWNGRADE) {
-                kAz.applyAccent(azTxt, pal.ok, pal.okBg, pal.okLip, true, true);
-            } else if (az == PolicyFlags.AZ_AUTO) {
-                kAz.applyAccent(azTxt, pal.warn, pal.warnBg, pal.warnLip, true, true);
-            } else {
-                kAz.applyAccent(azTxt, pal.outline, pal.keyOffBg, pal.keyOffLip, false, false);
+        PixelKeycapButton closeBtn = new PixelKeycapButton(ctx, m, pal);
+        closeBtn.setCompact(true);
+        closeBtn.setIconSprite(PixelSpriteAtlas.CTRL_CLOSE);
+        closeBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
             }
-            kIso.applyAccent("ISO", pal.info, pal.infoBg, pal.infoLip, PolicyFlags.has(fl, PolicyFlags.FLAG_ISO_FOLD), true);
-            kDev.applyAccent("DEV", pal.ok, pal.okBg, pal.okLip, PolicyFlags.has(fl, PolicyFlags.FLAG_DEV_COHERENT), true);
-            kA11y.applyAccent("A11Y", pal.focus, pal.focusBg, pal.focusLip, PolicyFlags.has(fl, PolicyFlags.FLAG_A11Y_COHERENT), true);
-            kPkg.applyAccent("PKG", pal.warn, pal.warnBg, pal.warnLip, PolicyFlags.has(fl, PolicyFlags.FLAG_PKG_CHANGES), true);
-            kDisp.applyAccent("DISP", pal.info, pal.infoBg, pal.infoLip, PolicyFlags.has(fl, PolicyFlags.FLAG_DISP_STEALTH), true);
-            sub.setText(item.packageName + "\nUID " + item.uid + "  APPID " + item.appId
-                    + "  MASK 0x" + Integer.toHexString(fl).toUpperCase(Locale.ROOT)
-                    + "  SCORE " + item.report.threatScore + "/100");
+        });
+        hdr.addView(closeBtn, new LinearLayout.LayoutParams(u * 13, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        if (row.report != null) {
+            PixelTagBarView radarTags = new PixelTagBarView(ctx, m, pal);
+            ManifestRadar.ScanReport rep = row.report;
+            int catTone = rep.isFinance() ? PixelBadgeView.TONE_WARN : PixelBadgeView.TONE_MUTED;
+            radarTags.addTag(rep.categoryLabel(), catTone);
+            radarTags.addTag("RISK " + rep.riskLabel(), rep.riskLevel >= ManifestRadar.RISK_HIGH ? PixelBadgeView.TONE_DANGER : PixelBadgeView.TONE_MUTED);
+            if (rep.appZygoteServiceCount > 0) {
+                radarTags.addTag("AZ:" + rep.appZygoteServiceCount, PixelBadgeView.TONE_ACCENT);
+            }
+            if (rep.isolatedServiceCount > 0) {
+                radarTags.addTag("ISO:" + rep.isolatedServiceCount, PixelBadgeView.TONE_MUTED);
+            }
+            for (int i = 0; i < rep.sdkTags.size() && i < 3; i++) {
+                radarTags.addTag(rep.sdkTags.get(i), PixelBadgeView.TONE_DANGER);
+            }
+            LinearLayout.LayoutParams rLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            );
+            rLp.topMargin = u * 3;
+            root.addView(radarTags, rLp);
+        }
+
+        PixelTextView hmLabel = new PixelTextView(ctx, m, pal);
+        hmLabel.setMicroMode(true);
+        hmLabel.setScale(m.microScale);
+        hmLabel.setColorRole(PixelTextView.ROLE_MUTED);
+        hmLabel.setText("PER-PILLAR TELEMETRY HITS  TOTAL " + row.totalHits);
+        LinearLayout.LayoutParams hmLblLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        hmLblLp.topMargin = u * 4;
+        root.addView(hmLabel, hmLblLp);
+
+        final PixelAppHeatmapBar heatmap = new PixelAppHeatmapBar(ctx, m, pal);
+        heatmap.bind(row.pillarHits, PolicyFlags.isAuditOnly(currentFlags[0]));
+        LinearLayout.LayoutParams hmLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        hmLp.topMargin = u * 2;
+        root.addView(heatmap, hmLp);
+
+        PixelTextView matLabel = new PixelTextView(ctx, m, pal);
+        matLabel.setMicroMode(true);
+        matLabel.setScale(m.microScale);
+        matLabel.setColorRole(PixelTextView.ROLE_MUTED);
+        matLabel.setText("10-PILLAR POLICY MATRIX");
+        LinearLayout.LayoutParams matLblLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        matLblLp.topMargin = u * 4;
+        root.addView(matLabel, matLblLp);
+
+        final PixelKeycapButton[] pillarBtns = new PixelKeycapButton[PolicyFlags.PILLAR_COUNT];
+        for (int r = 0; r < 2; r++) {
+            LinearLayout rowBox = new LinearLayout(ctx);
+            rowBox.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            );
+            rowLp.topMargin = u * 2;
+            root.addView(rowBox, rowLp);
+
+            for (int c = 0; c < 5; c++) {
+                final int pillar = r * 5 + c;
+                PixelKeycapButton btn = new PixelKeycapButton(ctx, m, pal);
+                btn.setCompact(true);
+                btn.setLabel(PolicyFlags.pillarCode(pillar));
+                btn.setIconSprite(PixelSpriteAtlas.pillarIcon(pillar));
+                LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+                if (c < 4) {
+                    blp.rightMargin = u * 2;
+                }
+                rowBox.addView(btn, blp);
+                pillarBtns[pillar] = btn;
+            }
+        }
+
+        final PixelKeycapButton auditBtn = new PixelKeycapButton(ctx, m, pal);
+        auditBtn.setLabel("SHADOW AUDIT DRY-RUN");
+        auditBtn.setIconSprite(PixelSpriteAtlas.CTRL_AUDIT);
+        LinearLayout.LayoutParams audLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        audLp.topMargin = u * 3;
+        root.addView(auditBtn, audLp);
+
+        PixelTextView presetLabel = new PixelTextView(ctx, m, pal);
+        presetLabel.setMicroMode(true);
+        presetLabel.setScale(m.microScale);
+        presetLabel.setColorRole(PixelTextView.ROLE_MUTED);
+        presetLabel.setText("QUICK PRESETS");
+        LinearLayout.LayoutParams preLblLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        preLblLp.topMargin = u * 4;
+        root.addView(presetLabel, preLblLp);
+
+        LinearLayout preRow = new LinearLayout(ctx);
+        preRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams preRowLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        preRowLp.topMargin = u * 2;
+        root.addView(preRow, preRowLp);
+
+        final PixelKeycapButton preOff = makePresetBtn(ctx, m, pal, "OFF", true);
+        final PixelKeycapButton preStd = makePresetBtn(ctx, m, pal, "STD", true);
+        final PixelKeycapButton preMax = makePresetBtn(ctx, m, pal, "MAX", true);
+        final PixelKeycapButton preAud = makePresetBtn(ctx, m, pal, "AUD", true);
+        final PixelKeycapButton preIso = makePresetBtn(ctx, m, pal, "ISO", false);
+        preRow.addView(preOff);
+        preRow.addView(preStd);
+        preRow.addView(preMax);
+        preRow.addView(preAud);
+        preRow.addView(preIso);
+
+        final Runnable refreshUi = new Runnable() {
+            @Override
+            public void run() {
+                int f = currentFlags[0];
+                root.setHeader("APP INSPECTOR", PolicyFlags.formatMaskHex(f));
+                iconView.setGuardedBorder(PolicyFlags.isActive(f));
+                metaTxt.setText("APPID " + row.appId + "  " + PolicyFlags.summarize(f));
+                heatmap.bind(row.pillarHits, PolicyFlags.isAuditOnly(f));
+
+                int az = PolicyFlags.azMode(f);
+                pillarBtns[PolicyFlags.PILLAR_AZ].setLabel(az == PolicyFlags.AZ_OFF ? "AZ" : PolicyFlags.azLabel(az));
+                if (az == PolicyFlags.AZ_HARD_DROP) {
+                    pillarBtns[PolicyFlags.PILLAR_AZ].setKeyState(PixelKeycapButton.STATE_DANGER);
+                } else if (az == PolicyFlags.AZ_DOWNGRADE) {
+                    pillarBtns[PolicyFlags.PILLAR_AZ].setKeyState(PixelKeycapButton.STATE_ON);
+                } else if (az == PolicyFlags.AZ_AUTO) {
+                    pillarBtns[PolicyFlags.PILLAR_AZ].setKeyState(PixelKeycapButton.STATE_WARN);
+                } else {
+                    pillarBtns[PolicyFlags.PILLAR_AZ].setKeyState(PixelKeycapButton.STATE_OFF);
+                }
+
+                for (int p = 1; p < PolicyFlags.PILLAR_COUNT; p++) {
+                    boolean en = PolicyFlags.isPillarEnabled(f, p);
+                    int st = en ? (p == PolicyFlags.PILLAR_ISO ? PixelKeycapButton.STATE_WARN : PixelKeycapButton.STATE_ON) : PixelKeycapButton.STATE_OFF;
+                    pillarBtns[p].setKeyState(st);
+                }
+
+                boolean isAud = PolicyFlags.isAuditOnly(f);
+                auditBtn.setKeyState(isAud ? PixelKeycapButton.STATE_AUDIT : PixelKeycapButton.STATE_OFF);
+                auditBtn.setLabel(isAud ? "SHADOW AUDIT ON  OBSERVE ONLY" : "SHADOW AUDIT OFF  ENFORCING");
+            }
         };
-        syncKeys.run();
 
-        kAz.setOnClickListener(v -> {
-            liveFlags[0] = PolicyFlags.cycleAzMode(liveFlags[0]);
-            callback.onApplyFlags(item.packageName, liveFlags[0]);
-            syncKeys.run();
-        });
-        kIso.setOnClickListener(v -> {
-            liveFlags[0] = PolicyFlags.toggle(liveFlags[0], PolicyFlags.FLAG_ISO_FOLD);
-            callback.onApplyFlags(item.packageName, liveFlags[0]);
-            syncKeys.run();
-        });
-        kDev.setOnClickListener(v -> {
-            liveFlags[0] = PolicyFlags.toggle(liveFlags[0], PolicyFlags.FLAG_DEV_COHERENT);
-            callback.onApplyFlags(item.packageName, liveFlags[0]);
-            syncKeys.run();
-        });
-        kA11y.setOnClickListener(v -> {
-            liveFlags[0] = PolicyFlags.toggle(liveFlags[0], PolicyFlags.FLAG_A11Y_COHERENT);
-            callback.onApplyFlags(item.packageName, liveFlags[0]);
-            syncKeys.run();
-        });
-        kPkg.setOnClickListener(v -> {
-            liveFlags[0] = PolicyFlags.toggle(liveFlags[0], PolicyFlags.FLAG_PKG_CHANGES);
-            callback.onApplyFlags(item.packageName, liveFlags[0]);
-            syncKeys.run();
-        });
-        kDisp.setOnClickListener(v -> {
-            liveFlags[0] = PolicyFlags.toggle(liveFlags[0], PolicyFlags.FLAG_DISP_STEALTH);
-            callback.onApplyFlags(item.packageName, liveFlags[0]);
-            syncKeys.run();
-        });
-
-        ScrollView scroll = new ScrollView(context);
-        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                pal.dp(220)
-        );
-        scrollLp.topMargin = u * 3;
-        root.addView(scroll, scrollLp);
-
-        LinearLayout body = new LinearLayout(context);
-        body.setOrientation(LinearLayout.VERTICAL);
-        body.setBackground(PixelChrome.inset(pal));
-        body.setPadding(u * 4, u * 4, u * 4, u * 4);
-        scroll.addView(body);
-
-        TextView reportView = new TextView(context);
-        reportView.setTypeface(pal.monoRegular);
-        reportView.setTextSize(10f);
-        reportView.setTextColor(pal.inkPrimary);
-        reportView.setTextIsSelectable(true);
-        reportView.setFontFeatureSettings("tnum");
-        reportView.setText(buildInspectorReport(item, snapshot));
-        body.addView(reportView);
-
-        LinearLayout presetRow = new LinearLayout(context);
-        presetRow.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams prLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        prLp.topMargin = u * 3;
-        root.addView(presetRow, prLp);
-
-        AlertDialog dialog = new AlertDialog.Builder(context)
-                .setView(root)
-                .create();
-
-        closeBtn.setOnClickListener(v -> dialog.dismiss());
-
-        PixelKeycapView btnWallet = makeBtn(context, pal, "WALLET", pal.info, pal.infoBg, pal.infoLip);
-        btnWallet.setOnClickListener(v -> {
-            liveFlags[0] = PolicyFlags.AZ_DOWNGRADE | PolicyFlags.FLAG_DEV_COHERENT | PolicyFlags.FLAG_A11Y_COHERENT | PolicyFlags.FLAG_PKG_CHANGES;
-            callback.onApplyFlags(item.packageName, liveFlags[0]);
-            syncKeys.run();
-        });
-        addWeighted(presetRow, btnWallet, 0);
-
-        PixelKeycapView btnBank = makeBtn(context, pal, "BANKING", pal.ok, pal.okBg, pal.okLip);
-        btnBank.setOnClickListener(v -> {
-            liveFlags[0] = PolicyFlags.PRESET_BANKING_STRICT;
-            callback.onApplyFlags(item.packageName, liveFlags[0]);
-            syncKeys.run();
-        });
-        addWeighted(presetRow, btnBank, u * 2);
-
-        PixelKeycapView btnClear = makeBtn(context, pal, "CLEAR", pal.danger, pal.dangerBg, pal.dangerLip);
-        btnClear.setOnClickListener(v -> {
-            liveFlags[0] = PolicyFlags.PRESET_NONE;
-            callback.onApplyFlags(item.packageName, liveFlags[0]);
-            syncKeys.run();
-        });
-        addWeighted(presetRow, btnClear, u * 2);
-
-        dialog.show();
-        Window w = dialog.getWindow();
-        if (w != null) {
-            w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-        }
-    }
-
-    private static PixelKeycapView makeBtn(Context ctx, PixelPalette p, String lbl, int acc, int bg, int lip) {
-        PixelKeycapView k = new PixelKeycapView(ctx, p, false);
-        k.setSmallText(true);
-        k.applyAccent(lbl, acc, bg, lip, true, false);
-        return k;
-    }
-
-    private static void addWeighted(LinearLayout row, PixelKeycapView key, int startMargin) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        lp.setMarginStart(startMargin);
-        row.addView(key, lp);
-    }
-
-    private static String buildInspectorReport(AppPolicyAdapter.AppItem item, TelemetryClient.SnapshotData snap) {
-        ManifestRadar.ScanReport r = item.report;
-        StringBuilder sb = new StringBuilder();
-        sb.append("SURFACE AUDIT\n");
-        sb.append("Category       : ").append(r.isSandbox ? "WEB OR MEDIA SANDBOX" : (r.financeLikely ? "FINANCIAL TARGET" : "STANDARD APP")).append('\n');
-        sb.append("AppZygote      : ").append(r.usesAppZygote ? "PRESENT" : "NONE").append('\n');
-        if (r.zygotePreloadName != null && !r.zygotePreloadName.isEmpty()) {
-            sb.append("Preload Class  : ").append(r.zygotePreloadName).append('\n');
-        }
-        sb.append("Internal Iso   : ").append(r.isolatedServices.size()).append('\n');
-        sb.append("External Iso   : ").append(r.externalIsolatedCount).append(" (PROTECTED)\n");
-        sb.append("QueryAllPkgs   : ").append(r.queriesAllPackages ? "YES" : "NO").append('\n');
-        if (!r.antifraudSdks.isEmpty()) {
-            sb.append("Antifraud SDK  : ").append(String.join(", ", r.antifraudSdks)).append('\n');
-        } else {
-            sb.append("Antifraud SDK  : NONE\n");
-        }
-
-        if (!r.appZygoteServices.isEmpty()) {
-            sb.append("\nAPPZYGOTE SERVICES\n");
-            for (String s : r.appZygoteServices) {
-                sb.append("  ").append(s).append('\n');
-            }
-        }
-        if (!r.isolatedServices.isEmpty()) {
-            sb.append("\nINTERNAL ISOLATED SERVICES\n");
-            for (String s : r.isolatedServices) {
-                sb.append("  ").append(s).append('\n');
-            }
-        }
-
-        sb.append("\nRECENT INTERCEPTIONS\n");
-        int shown = 0;
-        if (snap != null && snap.connected && !snap.events.isEmpty()) {
-            SimpleDateFormat fmt = new SimpleDateFormat("HH:mm:ss", Locale.US);
-            for (TelemetryClient.EventRecord ev : snap.events) {
-                if (ev.appId == item.appId || item.packageName.equals(ev.packageName)) {
-                    sb.append(fmt.format(new Date(ev.timestampMs)))
-                            .append("  ")
-                            .append(PolicyFlags.pillarName(ev.pillar))
-                            .append("  ")
-                            .append(PolicyFlags.vectorName(ev.vector))
-                            .append(" -> ")
-                            .append(PolicyFlags.actionName(ev.action))
-                            .append('\n');
-                    shown++;
-                    if (shown >= 14) {
-                        break;
-                    }
+        final OnFlagsChangedListener apply = new OnFlagsChangedListener() {
+            @Override
+            public void onFlagsChanged(String pkg, int nextFlags) {
+                currentFlags[0] = PolicyFlags.sanitize(nextFlags);
+                refreshUi.run();
+                if (listener != null) {
+                    listener.onFlagsChanged(pkg, currentFlags[0]);
                 }
             }
+        };
+
+        pillarBtns[PolicyFlags.PILLAR_AZ].setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                int nextAz = (PolicyFlags.azMode(currentFlags[0]) + 1) & PolicyFlags.AZ_MASK;
+                apply.onFlagsChanged(row.packageName, PolicyFlags.withAzMode(currentFlags[0], nextAz));
+            }
+        });
+        for (int p = 1; p < PolicyFlags.PILLAR_COUNT; p++) {
+            final int bit = PolicyFlags.pillarFlagBit(p);
+            pillarBtns[p].setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    apply.onFlagsChanged(row.packageName, PolicyFlags.toggleFlag(currentFlags[0], bit));
+                }
+            });
         }
-        if (shown == 0) {
-            sb.append("No recent events recorded in ring buffer.\n");
+
+        auditBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                int next = PolicyFlags.toggleFlag(currentFlags[0], PolicyFlags.FLAG_AUDIT_ONLY);
+                if (PolicyFlags.isAuditOnly(next) && !PolicyFlags.isActive(next)) {
+                    next = PolicyFlags.PRESET_AUDIT_BANK;
+                }
+                apply.onFlagsChanged(row.packageName, next);
+            }
+        });
+
+        preOff.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                apply.onFlagsChanged(row.packageName, PolicyFlags.PRESET_NONE);
+            }
+        });
+        preStd.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                apply.onFlagsChanged(row.packageName, PolicyFlags.PRESET_BANKING_STRICT);
+            }
+        });
+        preMax.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                apply.onFlagsChanged(row.packageName, PolicyFlags.PRESET_BANKING_MAX);
+            }
+        });
+        preAud.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                apply.onFlagsChanged(row.packageName, PolicyFlags.PRESET_AUDIT_BANK);
+            }
+        });
+        preIso.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                apply.onFlagsChanged(row.packageName, PolicyFlags.PRESET_WALLET_ALIPAY);
+            }
+        });
+
+        refreshUi.run();
+        dialog.setContentView(scroll);
+        Window win = dialog.getWindow();
+        if (win != null) {
+            win.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            win.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         }
-        return sb.toString().trim();
+        dialog.show();
     }
 
-    public interface PresetCallback {
-        void onApplyFlags(String packageName, int newFlags);
+    private static PixelKeycapButton makePresetBtn(
+        Context ctx,
+        PixelMetrics m,
+        PixelPalette pal,
+        String lbl,
+        boolean rightGap
+    ) {
+        PixelKeycapButton b = new PixelKeycapButton(ctx, m, pal);
+        b.setCompact(true);
+        b.setLabel(lbl);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        if (rightGap) {
+            lp.rightMargin = m.u * 2;
+        }
+        b.setLayoutParams(lp);
+        return b;
     }
 }

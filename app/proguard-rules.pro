@@ -1,4 +1,4 @@
 -dontwarn io.github.libxposed.**
 -keep class io.github.taro902.isolationpolicy.hook.Entry { *; }
 -keep class io.github.libxposed.service.** { *; }
--keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
+-keep class io.github.taro902.isolationpolicy.core.** { *; }

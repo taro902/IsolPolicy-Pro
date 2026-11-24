@@ -1,73 +1,134 @@
 package io.github.taro902.isolationpolicy.hook;
 
-import androidx.annotation.NonNull;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.github.libxposed.api.XposedModule;
+import io.github.taro902.isolationpolicy.BuildConfig;
 import io.github.taro902.isolationpolicy.core.Logger;
 
 public final class Entry extends XposedModule {
 
-    private static final String SETTINGS_PROVIDER_PKG = "com.android.providers.settings";
-
-    private final PolicyEngine engine = new PolicyEngine();
-    private final TelemetryHub telemetry = new TelemetryHub();
-    private final AppZygoteShield appZygoteShield = new AppZygoteShield();
-    private final IsolatedFoldShield isolatedFoldShield = new IsolatedFoldShield();
-    private final SettingsShield settingsShield = new SettingsShield();
-    private final UsbBroadcastShield usbBroadcastShield = new UsbBroadcastShield();
-    private final AccessibilityShield accessibilityShield = new AccessibilityShield();
-    private final PackageChangeShield packageChangeShield = new PackageChangeShield();
-    private final DisplayShield displayShield = new DisplayShield();
-
-    private volatile boolean systemServerMode;
+    private static final PolicyEngine ENGINE = new PolicyEngine();
+    private static final TelemetryHub HUB = new TelemetryHub();
+    private static final AtomicBoolean SYSTEM_INSTALLED = new AtomicBoolean(false);
 
     public Entry() {
         super();
     }
 
     @Override
-    public void onModuleLoaded(@NonNull ModuleLoadedParam param) {
-        if (!param.isSystemServer()) {
-            detach();
-            return;
+    public void onModuleLoaded(ModuleLoadedParam param) {
+        Logger.attach(this);
+        try {
+            HUB.setFrameworkApiVersion(getApiVersion());
+        } catch (Throwable ignored) {
         }
-        systemServerMode = true;
-        Logger.bind(this);
-        engine.init(this);
-    }
-
-    @Override
-    public void onSystemServerStarting(@NonNull SystemServerStartingParam param) {
-        if (!systemServerMode) {
-            return;
-        }
-        ClassLoader sysCl = param.getClassLoader();
-        appZygoteShield.install(this, sysCl, engine, telemetry);
-        isolatedFoldShield.install(this, sysCl, engine, telemetry);
-        usbBroadcastShield.install(this, sysCl, engine, telemetry);
-        accessibilityShield.install(this, sysCl, engine, telemetry);
-        packageChangeShield.install(this, sysCl, engine, telemetry);
-        displayShield.install(this, sysCl, engine, telemetry);
-        settingsShield.attachIfNeeded(this, sysCl, engine, telemetry);
-    }
-
-    @Override
-    public void onPackageLoaded(@NonNull PackageLoadedParam param) {
-        if (!systemServerMode) {
-            return;
-        }
-        if (SETTINGS_PROVIDER_PKG.equals(param.getPackageName())) {
-            settingsShield.attachIfNeeded(this, param.getDefaultClassLoader(), engine, telemetry);
+        if (param != null && param.isSystemServer()) {
+            Logger.i("IsolPolicy " + BuildConfig.VERSION_NAME + " loaded in system_server (api=" + HUB.getFrameworkApiVersion() + ")");
         }
     }
 
     @Override
-    public void onPackageReady(@NonNull PackageReadyParam param) {
-        if (!systemServerMode) {
+    public void onSystemServerStarting(SystemServerStartingParam param) {
+        if (param == null || !SYSTEM_INSTALLED.compareAndSet(false, true)) {
             return;
         }
-        if (SETTINGS_PROVIDER_PKG.equals(param.getPackageName())) {
-            settingsShield.attachIfNeeded(this, param.getClassLoader(), engine, telemetry);
+        Logger.attach(this);
+        ClassLoader cl = param.getClassLoader();
+        ENGINE.attachModule(this);
+
+        installPillarSafe("AZ", new Runnable() {
+            @Override
+            public void run() {
+                AppZygoteShield.install(Entry.this, cl, ENGINE, HUB);
+            }
+        });
+        installPillarSafe("ISO", new Runnable() {
+            @Override
+            public void run() {
+                IsolatedFoldShield.install(Entry.this, cl, ENGINE, HUB);
+            }
+        });
+        installPillarSafe("SET_EARLY", new Runnable() {
+            @Override
+            public void run() {
+                SettingsShield.installIfPresent(Entry.this, cl, ENGINE, HUB, BuildConfig.VERSION_NAME);
+            }
+        });
+        installPillarSafe("USB", new Runnable() {
+            @Override
+            public void run() {
+                UsbBroadcastShield.install(Entry.this, cl, ENGINE, HUB);
+            }
+        });
+        installPillarSafe("A11Y", new Runnable() {
+            @Override
+            public void run() {
+                AccessibilityShield.install(Entry.this, cl, ENGINE, HUB);
+            }
+        });
+        installPillarSafe("PKG", new Runnable() {
+            @Override
+            public void run() {
+                PackageSurfaceShield.install(Entry.this, cl, ENGINE, HUB);
+            }
+        });
+        installPillarSafe("DISP", new Runnable() {
+            @Override
+            public void run() {
+                DisplayShield.install(Entry.this, cl, ENGINE, HUB);
+            }
+        });
+        installPillarSafe("PROC", new Runnable() {
+            @Override
+            public void run() {
+                ProcessSurfaceShield.install(Entry.this, cl, ENGINE, HUB);
+            }
+        });
+        installPillarSafe("INP", new Runnable() {
+            @Override
+            public void run() {
+                InputSurfaceShield.install(Entry.this, cl, ENGINE, HUB);
+            }
+        });
+        installPillarSafe("OBS", new Runnable() {
+            @Override
+            public void run() {
+                ObserverCoherenceShield.install(Entry.this, cl, ENGINE, HUB);
+            }
+        });
+
+        int mask = HUB.computeHealthMask();
+        Logger.i("IsolPolicy " + BuildConfig.VERSION_NAME + " active pillars=" + TelemetryHub.countHealthyPillars(mask) + "/10");
+    }
+
+    @Override
+    public void onPackageLoaded(PackageLoadedParam param) {
+        if (param == null) {
+            return;
+        }
+        String pkg = param.getPackageName();
+        if ("com.android.providers.settings".equals(pkg) || "android".equals(pkg)) {
+            SettingsShield.installIfPresent(this, param.getDefaultClassLoader(), ENGINE, HUB, BuildConfig.VERSION_NAME);
+        }
+    }
+
+    @Override
+    public void onPackageReady(PackageReadyParam param) {
+        if (param == null) {
+            return;
+        }
+        String pkg = param.getPackageName();
+        if ("com.android.providers.settings".equals(pkg) || "android".equals(pkg)) {
+            SettingsShield.installIfPresent(this, param.getClassLoader(), ENGINE, HUB, BuildConfig.VERSION_NAME);
+        }
+    }
+
+    private static void installPillarSafe(String name, Runnable action) {
+        try {
+            action.run();
+        } catch (Throwable t) {
+            Logger.e("pillar init failed: " + name, t);
         }
     }
 }

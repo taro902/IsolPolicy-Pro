@@ -10,22 +10,30 @@ android {
         applicationId = "io.github.taro902.isolationpolicy"
         minSdk = 29
         targetSdk = 36
-        versionCode = 5
-        versionName = "2.1.1"
+        versionCode = 6
+        versionName = "2.2.0"
     }
 
     buildFeatures {
         buildConfig = true
+        aidl = false
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 
     signingConfigs {
         create("release") {
             val ksPath = System.getenv("KEYSTORE_PATH")
-            if (!ksPath.isNullOrBlank()) {
+            val ksPass = System.getenv("KEYSTORE_PASS")
+            val kAlias = System.getenv("KEY_ALIAS")
+            val kPass = System.getenv("KEY_PASS") ?: System.getenv("KEYPASS")
+            if (!ksPath.isNullOrBlank() && !ksPass.isNullOrBlank() && !kAlias.isNullOrBlank() && !kPass.isNullOrBlank()) {
                 storeFile = file(ksPath)
-                storePassword = System.getenv("KEYSTORE_PASS")
-                keyAlias = System.getenv("KEY_ALIAS") ?: "isolationpolicy"
-                keyPassword = System.getenv("KEYPASS")
+                storePassword = ksPass
+                keyAlias = kAlias
+                keyPassword = kPass
                 enableV1Signing = true
                 enableV2Signing = true
                 enableV3Signing = true
@@ -35,12 +43,12 @@ android {
 
     buildTypes {
         release {
-            val ksPath = System.getenv("KEYSTORE_PATH")
-            if (!ksPath.isNullOrBlank()) {
-                signingConfig = signingConfigs.getByName("release")
-            }
             isMinifyEnabled = true
             isShrinkResources = true
+            val relSign = signingConfigs.findByName("release")
+            if (relSign != null && relSign.storeFile != null) {
+                signingConfig = relSign
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -63,30 +71,25 @@ android {
 
     packaging {
         resources {
-            pickFirsts += listOf(
-                "META-INF/LICENSE",
-                "META-INF/NOTICE",
-                "META-INF/xposed/module.prop",
-                "META-INF/xposed/java_init.list",
-                "META-INF/xposed/scope.list"
-            )
             excludes += listOf(
+                "META-INF/LICENSE*",
+                "META-INF/NOTICE*",
                 "META-INF/DEPENDENCIES",
-                "META-INF/*.kotlin_module",
-                "META-INF/androidx.*",
-                "META-INF/LICENSE.txt",
-                "META-INF/NOTICE.txt"
+                "META-INF/*.kotlin_module"
             )
         }
     }
 }
 
-tasks.matching { it.name.endsWith("AarMetadata") }.configureEach {
-    enabled = false
+tasks.configureEach {
+    if (name.contains("AarMetadata")) {
+        enabled = false
+    }
 }
 
 dependencies {
     compileOnly("io.github.libxposed:api:102.0.0")
     implementation("io.github.libxposed:service:102.0.0")
     implementation("androidx.recyclerview:recyclerview:1.4.0")
+    testImplementation("junit:junit:4.13.2")
 }

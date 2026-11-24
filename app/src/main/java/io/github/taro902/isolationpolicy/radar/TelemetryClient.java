@@ -1,218 +1,347 @@
 package io.github.taro902.isolationpolicy.radar;
 
+import android.content.ContentResolver;
 import android.content.Context;
 import android.os.Bundle;
 import android.provider.Settings;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 import io.github.taro902.isolationpolicy.core.PolicyFlags;
+import io.github.taro902.isolationpolicy.hook.TelemetryHub;
 
 public final class TelemetryClient {
 
     private TelemetryClient() {
     }
 
-    public static SnapshotData fetchSnapshot(Context context) {
-        try {
-            Bundle extras = new Bundle(1);
-            extras.putString(PolicyFlags.IPC_ARG_CMD, PolicyFlags.IPC_CMD_SNAPSHOT);
-            Bundle res = context.getContentResolver().call(
-                    Settings.Global.CONTENT_URI,
-                    PolicyFlags.IPC_METHOD,
-                    PolicyFlags.IPC_CMD_SNAPSHOT,
-                    extras
-            );
-            if (res == null || !res.containsKey("health")) {
-                return SnapshotData.DISCONNECTED;
-            }
-            long total = res.getLong("total", 0L);
-            long[] counts = res.getLongArray("counts");
-            if (counts == null || counts.length < 8) {
-                counts = new long[8];
-            }
-            int health = res.getInt("health", 0);
-            long uptime = res.getLong("uptime", 0L);
-            int guarded = res.getInt("guarded", 0);
-            int graph = res.getInt("graph", 0);
-            int api = res.getInt("api", 102);
-            String fw = res.getString("fw", "LSPosed");
-            String ver = res.getString("ver", PolicyFlags.VERSION_NAME);
-
-            long[] ts = res.getLongArray("ev_ts");
-            int[] uids = res.getIntArray("ev_uid");
-            String[] pkgs = res.getStringArray("ev_pkg");
-            int[] pils = res.getIntArray("ev_pil");
-            int[] vecs = res.getIntArray("ev_vec");
-            int[] acts = res.getIntArray("ev_act");
-
-            List<EventRecord> events = new ArrayList<>();
-            if (ts != null && uids != null && pkgs != null && pils != null && vecs != null && acts != null) {
-                int n = Math.min(ts.length, Math.min(uids.length, Math.min(pkgs.length, Math.min(pils.length, Math.min(vecs.length, acts.length)))));
-                for (int i = 0; i < n; i++) {
-                    events.add(new EventRecord(ts[i], uids[i], pkgs[i], pils[i], vecs[i], acts[i]));
-                }
-            }
-            return new SnapshotData(true, total, counts, health, uptime, guarded, graph, api, fw, ver, events);
-        } catch (Throwable ignored) {
-            return SnapshotData.DISCONNECTED;
-        }
-    }
-
-    public static boolean purge(Context context) {
-        try {
-            Bundle extras = new Bundle(1);
-            extras.putString(PolicyFlags.IPC_ARG_CMD, PolicyFlags.IPC_CMD_PURGE);
-            Bundle res = context.getContentResolver().call(
-                    Settings.Global.CONTENT_URI,
-                    PolicyFlags.IPC_METHOD,
-                    PolicyFlags.IPC_CMD_PURGE,
-                    extras
-            );
-            return res != null && res.getBoolean("ok", false);
-        } catch (Throwable ignored) {
-            return false;
-        }
-    }
-
-    public static DiagnosticResult runSelfDiagnostic(Context context, boolean serviceBound, int serviceApi, String serviceFw) {
-        boolean ipcAlive = false;
-        int healthMask = 0;
-        String remoteVer = "-";
-        try {
-            Bundle extras = new Bundle(1);
-            extras.putString(PolicyFlags.IPC_ARG_CMD, PolicyFlags.IPC_CMD_PING);
-            Bundle res = context.getContentResolver().call(
-                    Settings.Global.CONTENT_URI,
-                    PolicyFlags.IPC_METHOD,
-                    PolicyFlags.IPC_CMD_PING,
-                    extras
-            );
-            if (res != null && res.getBoolean("ok", false)) {
-                ipcAlive = true;
-                healthMask = res.getInt("health", 0);
-                remoteVer = res.getString("ver", PolicyFlags.VERSION_NAME);
-            }
-        } catch (Throwable ignored) {
-        }
-
-        boolean devOn = Settings.Global.getInt(context.getContentResolver(), Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) != 0;
-        boolean adbOn = Settings.Global.getInt(context.getContentResolver(), Settings.Global.ADB_ENABLED, 0) != 0;
-        boolean a11yOn = Settings.Secure.getInt(context.getContentResolver(), Settings.Secure.ACCESSIBILITY_ENABLED, 0) != 0;
-
-        return new DiagnosticResult(serviceBound, serviceApi, serviceFw, ipcAlive, healthMask, remoteVer, devOn, adbOn, a11yOn);
-    }
-
-    public static int decodeHookState(int healthMask, int hookBit) {
-        return (healthMask >>> (hookBit * 2)) & 0x03;
-    }
-
-    public static int countHealthyHooks(int healthMask) {
-        int ok = 0;
-        for (int i = 0; i < 7; i++) {
-            int st = decodeHookState(healthMask, i);
-            if (st == 1 || st == 2) {
-                ok++;
-            }
-        }
-        return ok;
-    }
-
-    public static final class EventRecord {
+    public static final class EventRow {
         public final long timestampMs;
         public final int appId;
-        public final String packageName;
         public final int pillar;
         public final int vector;
         public final int action;
+        public final boolean isAudit;
+        public final int aux;
 
-        public EventRecord(long timestampMs, int appId, String packageName, int pillar, int vector, int action) {
+        public EventRow(long timestampMs, int appId, int meta) {
             this.timestampMs = timestampMs;
             this.appId = appId;
-            this.packageName = packageName != null ? packageName : ("uid:" + appId);
-            this.pillar = pillar;
-            this.vector = vector;
-            this.action = action;
+            this.pillar = TelemetryHub.unpackPillar(meta);
+            this.vector = TelemetryHub.unpackVector(meta);
+            this.action = TelemetryHub.unpackAction(meta);
+            this.isAudit = TelemetryHub.unpackIsAudit(meta);
+            this.aux = TelemetryHub.unpackAux(meta);
         }
     }
 
-    public static final class SnapshotData {
-        public static final SnapshotData DISCONNECTED = new SnapshotData(
-                false, 0L, new long[8], 0, 0L, 0, 0, 0, "OFFLINE", "-", Collections.emptyList()
-        );
-
+    public static final class TelemetrySnapshot {
         public final boolean connected;
-        public final long total;
-        public final long[] counts;
-        public final int healthMask;
-        public final long uptimeMs;
-        public final int guardedCount;
-        public final int graphSize;
+        public final String moduleVersion;
         public final int apiVersion;
-        public final String frameworkName;
-        public final String versionName;
-        public final List<EventRecord> events;
+        public final int selfAppId;
+        public final int healthMask;
+        public final int[] pillarTiers;
+        public final int[] pillarFaults;
+        public final long[] pillarEnforced;
+        public final long[] pillarAudit;
+        public final int graphCount;
+        public final int guardedCount;
+        public final long snapshotVersion;
+        public final int hostDev;
+        public final int hostAdb;
+        public final int hostAdbWifi;
+        public final int hostA11y;
+        public final List<EventRow> events;
+        public final Map<Integer, long[]> appPillarMatrix;
+        public final Map<Integer, Long> appAuditTotals;
 
-        public SnapshotData(
-                boolean connected,
-                long total,
-                long[] counts,
-                int healthMask,
-                long uptimeMs,
-                int guardedCount,
-                int graphSize,
-                int apiVersion,
-                String frameworkName,
-                String versionName,
-                List<EventRecord> events
+        public TelemetrySnapshot(
+            boolean connected,
+            String moduleVersion,
+            int apiVersion,
+            int selfAppId,
+            int healthMask,
+            int[] pillarTiers,
+            int[] pillarFaults,
+            long[] pillarEnforced,
+            long[] pillarAudit,
+            int graphCount,
+            int guardedCount,
+            long snapshotVersion,
+            int hostDev,
+            int hostAdb,
+            int hostAdbWifi,
+            int hostA11y,
+            List<EventRow> events,
+            Map<Integer, long[]> appPillarMatrix,
+            Map<Integer, Long> appAuditTotals
         ) {
             this.connected = connected;
-            this.total = total;
-            this.counts = counts;
-            this.healthMask = healthMask;
-            this.uptimeMs = uptimeMs;
-            this.guardedCount = guardedCount;
-            this.graphSize = graphSize;
+            this.moduleVersion = moduleVersion != null ? moduleVersion : "";
             this.apiVersion = apiVersion;
-            this.frameworkName = frameworkName;
-            this.versionName = versionName;
-            this.events = Collections.unmodifiableList(events);
+            this.selfAppId = selfAppId;
+            this.healthMask = healthMask;
+            this.pillarTiers = ensureIntArray(pillarTiers, PolicyFlags.PILLAR_COUNT);
+            this.pillarFaults = ensureIntArray(pillarFaults, PolicyFlags.PILLAR_COUNT);
+            this.pillarEnforced = ensureLongArray(pillarEnforced, PolicyFlags.PILLAR_COUNT);
+            this.pillarAudit = ensureLongArray(pillarAudit, PolicyFlags.PILLAR_COUNT);
+            this.graphCount = graphCount;
+            this.guardedCount = guardedCount;
+            this.snapshotVersion = snapshotVersion;
+            this.hostDev = hostDev;
+            this.hostAdb = hostAdb;
+            this.hostAdbWifi = hostAdbWifi;
+            this.hostA11y = hostA11y;
+            this.events = events != null ? Collections.unmodifiableList(events) : Collections.<EventRow>emptyList();
+            this.appPillarMatrix = appPillarMatrix != null ? Collections.unmodifiableMap(appPillarMatrix) : Collections.<Integer, long[]>emptyMap();
+            this.appAuditTotals = appAuditTotals != null ? Collections.unmodifiableMap(appAuditTotals) : Collections.<Integer, Long>emptyMap();
+        }
+
+        public static TelemetrySnapshot offline() {
+            return new TelemetrySnapshot(
+                false,
+                "",
+                0,
+                -1,
+                0,
+                null,
+                null,
+                null,
+                null,
+                0,
+                0,
+                0L,
+                -1,
+                -1,
+                -1,
+                -1,
+                Collections.<EventRow>emptyList(),
+                Collections.<Integer, long[]>emptyMap(),
+                Collections.<Integer, Long>emptyMap()
+            );
+        }
+
+        public int healthyPillarCount() {
+            return TelemetryHub.countHealthyPillars(healthMask);
+        }
+
+        public long totalEnforced() {
+            long sum = 0L;
+            for (int i = 0; i < pillarEnforced.length; i++) {
+                sum += pillarEnforced[i];
+            }
+            return sum;
+        }
+
+        public long totalAudit() {
+            long sum = 0L;
+            for (int i = 0; i < pillarAudit.length; i++) {
+                sum += pillarAudit[i];
+            }
+            return sum;
+        }
+
+        public long[] getAppPillars(int appId) {
+            long[] row = appPillarMatrix.get(Integer.valueOf(appId));
+            return row != null ? row : new long[PolicyFlags.PILLAR_COUNT];
+        }
+
+        public long getAppTotalHits(int appId) {
+            long[] row = appPillarMatrix.get(Integer.valueOf(appId));
+            if (row == null) {
+                return 0L;
+            }
+            long sum = 0L;
+            for (int i = 0; i < row.length; i++) {
+                sum += row[i];
+            }
+            return sum;
+        }
+
+        public long getAppAuditHits(int appId) {
+            Long v = appAuditTotals.get(Integer.valueOf(appId));
+            return v != null ? v.longValue() : 0L;
+        }
+
+        public String formatTraceReport(Map<Integer, String> appNames) {
+            SimpleDateFormat fmt = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US);
+            StringBuilder sb = new StringBuilder(1024);
+            sb.append("IsolPolicy ").append(moduleVersion.isEmpty() ? "2.2.0" : moduleVersion);
+            sb.append(" API=").append(apiVersion);
+            sb.append(" HOOKS=").append(healthyPillarCount()).append("/").append(PolicyFlags.PILLAR_COUNT);
+            sb.append(" ENF=").append(totalEnforced());
+            sb.append(" AUD=").append(totalAudit());
+            sb.append(" GRAPH=").append(graphCount).append('\n');
+            for (int i = events.size() - 1; i >= 0; i--) {
+                EventRow ev = events.get(i);
+                String app = appNames != null ? appNames.get(Integer.valueOf(ev.appId)) : null;
+                if (app == null || app.isEmpty()) {
+                    app = "uid_" + ev.appId;
+                }
+                sb.append(fmt.format(new Date(ev.timestampMs)))
+                    .append(' ')
+                    .append(ev.isAudit ? "AUD" : "ENF")
+                    .append(' ')
+                    .append(PolicyFlags.pillarCode(ev.pillar))
+                    .append(' ')
+                    .append(PolicyFlags.vectorName(ev.vector))
+                    .append(' ')
+                    .append(PolicyFlags.actionName(ev.action))
+                    .append(' ')
+                    .append(app);
+                if (ev.aux > 0) {
+                    sb.append(" x").append(ev.aux);
+                }
+                sb.append('\n');
+            }
+            return sb.toString();
         }
     }
 
-    public static final class DiagnosticResult {
-        public final boolean serviceBound;
-        public final int serviceApi;
-        public final String serviceFw;
-        public final boolean ipcAlive;
-        public final int healthMask;
-        public final String remoteVer;
-        public final boolean hostDevOn;
-        public final boolean hostAdbOn;
-        public final boolean hostA11yOn;
-
-        public DiagnosticResult(
-                boolean serviceBound,
-                int serviceApi,
-                String serviceFw,
-                boolean ipcAlive,
-                int healthMask,
-                String remoteVer,
-                boolean hostDevOn,
-                boolean hostAdbOn,
-                boolean hostA11yOn
-        ) {
-            this.serviceBound = serviceBound;
-            this.serviceApi = serviceApi;
-            this.serviceFw = serviceFw;
-            this.ipcAlive = ipcAlive;
-            this.healthMask = healthMask;
-            this.remoteVer = remoteVer;
-            this.hostDevOn = hostDevOn;
-            this.hostAdbOn = hostAdbOn;
-            this.hostA11yOn = hostA11yOn;
+    public static TelemetrySnapshot fetchSnapshot(Context context) {
+        if (context == null) {
+            return TelemetrySnapshot.offline();
         }
+        Bundle res = invokeIpc(context, PolicyFlags.IPC_CMD_SNAP);
+        if (res == null || !res.containsKey(TelemetryHub.KEY_HEALTH_MASK)) {
+            return TelemetrySnapshot.offline();
+        }
+        return parseBundle(res);
+    }
+
+    public static boolean purge(Context context) {
+        if (context == null) {
+            return false;
+        }
+        Bundle res = invokeIpc(context, PolicyFlags.IPC_CMD_PURGE);
+        return res != null && res.getBoolean("ok", false);
+    }
+
+    public static boolean ping(Context context) {
+        if (context == null) {
+            return false;
+        }
+        Bundle res = invokeIpc(context, PolicyFlags.IPC_CMD_PING);
+        return res != null && res.containsKey(TelemetryHub.KEY_HEALTH_MASK);
+    }
+
+    private static Bundle invokeIpc(Context context, String cmd) {
+        ContentResolver cr = context.getContentResolver();
+        if (cr == null) {
+            return null;
+        }
+        Bundle extras = new Bundle();
+        extras.putString(PolicyFlags.IPC_ARG_CMD, cmd);
+        try {
+            Bundle res = cr.call(Settings.Global.CONTENT_URI, PolicyFlags.IPC_METHOD, cmd, extras);
+            if (res != null && (res.containsKey(TelemetryHub.KEY_HEALTH_MASK) || res.getBoolean("ok", false))) {
+                return res;
+            }
+        } catch (Throwable ignored) {
+        }
+        try {
+            return cr.call(Settings.Global.CONTENT_URI, PolicyFlags.IPC_METHOD_LEGACY_V21, cmd, extras);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    public static TelemetrySnapshot parseBundle(Bundle res) {
+        if (res == null) {
+            return TelemetrySnapshot.offline();
+        }
+        String ver = res.getString(TelemetryHub.KEY_VERSION, "");
+        int api = res.getInt(TelemetryHub.KEY_API_VERSION, 0);
+        int selfId = res.getInt(TelemetryHub.KEY_SELF_APP_ID, -1);
+        int health = res.getInt(TelemetryHub.KEY_HEALTH_MASK, 0);
+        int[] tiers = res.getIntArray(TelemetryHub.KEY_PILLAR_TIERS);
+        int[] faults = res.getIntArray(TelemetryHub.KEY_PILLAR_FAULTS);
+        long[] enf = res.getLongArray(TelemetryHub.KEY_PILLAR_ENFORCED);
+        long[] aud = res.getLongArray(TelemetryHub.KEY_PILLAR_AUDIT);
+        int graphCnt = res.getInt(TelemetryHub.KEY_GRAPH_COUNT, 0);
+        int guardedCnt = res.getInt(TelemetryHub.KEY_GUARDED_COUNT, 0);
+        long snapVer = res.getLong(TelemetryHub.KEY_SNAPSHOT_VER, 0L);
+        int hostDev = res.getInt(TelemetryHub.KEY_HOST_DEV, -1);
+        int hostAdb = res.getInt(TelemetryHub.KEY_HOST_ADB, -1);
+        int hostWifi = res.getInt(TelemetryHub.KEY_HOST_ADB_WIFI, -1);
+        int hostA11y = res.getInt(TelemetryHub.KEY_HOST_A11Y, -1);
+
+        long[] rTs = res.getLongArray(TelemetryHub.KEY_RING_TS);
+        int[] rApp = res.getIntArray(TelemetryHub.KEY_RING_APP);
+        int[] rMeta = res.getIntArray(TelemetryHub.KEY_RING_META);
+        ArrayList<EventRow> rows = new ArrayList<EventRow>();
+        if (rTs != null && rApp != null && rMeta != null) {
+            int n = Math.min(rTs.length, Math.min(rApp.length, rMeta.length));
+            for (int i = 0; i < n; i++) {
+                if (rTs[i] > 0L) {
+                    rows.add(new EventRow(rTs[i], rApp[i], rMeta[i]));
+                }
+            }
+        }
+
+        int[] appIds = res.getIntArray(TelemetryHub.KEY_APP_IDS);
+        long[] flatMatrix = res.getLongArray(TelemetryHub.KEY_APP_MATRIX);
+        long[] appAudArr = res.getLongArray(TelemetryHub.KEY_APP_AUDIT);
+        HashMap<Integer, long[]> matrixMap = new HashMap<Integer, long[]>();
+        HashMap<Integer, Long> auditMap = new HashMap<Integer, Long>();
+        if (appIds != null && flatMatrix != null) {
+            for (int i = 0; i < appIds.length; i++) {
+                int off = i * PolicyFlags.PILLAR_COUNT;
+                if (off + PolicyFlags.PILLAR_COUNT <= flatMatrix.length) {
+                    long[] slice = new long[PolicyFlags.PILLAR_COUNT];
+                    System.arraycopy(flatMatrix, off, slice, 0, PolicyFlags.PILLAR_COUNT);
+                    matrixMap.put(Integer.valueOf(appIds[i]), slice);
+                }
+                if (appAudArr != null && i < appAudArr.length) {
+                    auditMap.put(Integer.valueOf(appIds[i]), Long.valueOf(appAudArr[i]));
+                }
+            }
+        }
+
+        return new TelemetrySnapshot(
+            true,
+            ver,
+            api,
+            selfId,
+            health,
+            tiers,
+            faults,
+            enf,
+            aud,
+            graphCnt,
+            guardedCnt,
+            snapVer,
+            hostDev,
+            hostAdb,
+            hostWifi,
+            hostA11y,
+            rows,
+            matrixMap,
+            auditMap
+        );
+    }
+
+    private static int[] ensureIntArray(int[] src, int len) {
+        int[] out = new int[len];
+        if (src != null) {
+            System.arraycopy(src, 0, out, 0, Math.min(src.length, len));
+        }
+        return out;
+    }
+
+    private static long[] ensureLongArray(long[] src, int len) {
+        long[] out = new long[len];
+        if (src != null) {
+            System.arraycopy(src, 0, out, 0, Math.min(src.length, len));
+        }
+        return out;
     }
 }

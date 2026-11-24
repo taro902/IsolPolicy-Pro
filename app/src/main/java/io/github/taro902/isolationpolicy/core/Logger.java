@@ -3,60 +3,86 @@ package io.github.taro902.isolationpolicy.core;
 import android.util.Log;
 
 import io.github.libxposed.api.XposedInterface;
-import io.github.taro902.isolationpolicy.BuildConfig;
 
 public final class Logger {
 
-    private static final String PREFIX = "IsolPolicy/";
-    private static volatile XposedInterface sXposed;
+    public static final String TAG = "IsolPolicy";
+    private static volatile XposedInterface moduleRef;
 
     private Logger() {
     }
 
-    public static void bind(XposedInterface xposed) {
-        if (!BuildConfig.DEBUG) {
-            return;
-        }
-        sXposed = xposed;
+    public static void attach(XposedInterface module) {
+        moduleRef = module;
     }
 
-    public static void d(String tag, String msg) {
-        if (!BuildConfig.DEBUG) {
+    public static void i(String message) {
+        if (message == null) {
             return;
         }
-        XposedInterface x = sXposed;
-        if (x != null) {
-            x.log(Log.DEBUG, PREFIX + tag, msg);
-        } else {
-            Log.d(PREFIX + tag, msg);
-        }
-    }
-
-    public static void w(String tag, String msg) {
-        if (!BuildConfig.DEBUG) {
-            return;
-        }
-        XposedInterface x = sXposed;
-        if (x != null) {
-            x.log(Log.WARN, PREFIX + tag, msg);
-        } else {
-            Log.w(PREFIX + tag, msg);
-        }
-    }
-
-    public static void e(String tag, String msg, Throwable t) {
-        if (!BuildConfig.DEBUG) {
-            return;
-        }
-        XposedInterface x = sXposed;
-        if (x != null) {
-            if (t != null) {
-                x.log(Log.ERROR, PREFIX + tag, msg, t);
-            } else {
-                x.log(Log.ERROR, PREFIX + tag, msg);
+        XposedInterface m = moduleRef;
+        if (m != null) {
+            try {
+                m.log(Log.INFO, TAG, message);
+                return;
+            } catch (Throwable ignored) {
             }
-        } else {
-            Log.e(PREFIX + tag, msg, t);
+        }
+        try {
+            Log.i(TAG, message);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    public static void w(String message) {
+        if (message == null) {
+            return;
+        }
+        XposedInterface m = moduleRef;
+        if (m != null) {
+            try {
+                m.log(Log.WARN, TAG, message);
+                return;
+            } catch (Throwable ignored) {
+            }
+        }
+        try {
+            Log.w(TAG, message);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    public static void e(String message) {
+        if (message == null) {
+            return;
+        }
+        XposedInterface m = moduleRef;
+        if (m != null) {
+            try {
+                m.log(Log.ERROR, TAG, message);
+                return;
+            } catch (Throwable ignored) {
+            }
+        }
+        try {
+            Log.e(TAG, message);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    public static void e(String message, Throwable throwable) {
+        String safeMsg = message != null ? message : "error";
+        XposedInterface m = moduleRef;
+        if (m != null) {
+            try {
+                m.log(Log.ERROR, TAG, safeMsg, throwable);
+                return;
+            } catch (Throwable ignored) {
+            }
+        }
+        try {
+            Log.e(TAG, safeMsg, throwable);
+        } catch (Throwable ignored) {
         }
     }
 }

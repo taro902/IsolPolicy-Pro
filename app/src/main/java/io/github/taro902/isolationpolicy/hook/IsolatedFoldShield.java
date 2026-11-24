@@ -1,178 +1,144 @@
 package io.github.taro902.isolationpolicy.hook;
 
-import android.content.ComponentName;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.ServiceInfo;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 
 import io.github.libxposed.api.XposedInterface;
-import io.github.libxposed.api.XposedModule;
-import io.github.taro902.isolationpolicy.core.Logger;
 import io.github.taro902.isolationpolicy.core.PolicyFlags;
 
 public final class IsolatedFoldShield {
 
-    private static final String TAG = "IsolatedFoldShield";
-    private static final int FLAG_ISOLATED = 0x0002;
-    private static final int FLAG_EXTERNAL = 0x0004;
-    private static final int FLAG_APP_ZYGOTE = 0x0008;
-
-    private static final Set<String> PROTECTED_SANDBOX_PKGS = new HashSet<>();
-
-    static {
-        PROTECTED_SANDBOX_PKGS.add("com.google.android.webview");
-        PROTECTED_SANDBOX_PKGS.add("com.android.webview");
-        PROTECTED_SANDBOX_PKGS.add("com.android.chrome");
-        PROTECTED_SANDBOX_PKGS.add("com.chrome.beta");
-        PROTECTED_SANDBOX_PKGS.add("com.chrome.dev");
-        PROTECTED_SANDBOX_PKGS.add("com.chrome.canary");
-        PROTECTED_SANDBOX_PKGS.add("com.brave.browser");
-        PROTECTED_SANDBOX_PKGS.add("org.chromium.webview_shell");
-        PROTECTED_SANDBOX_PKGS.add("com.google.android.trichromelibrary");
-        PROTECTED_SANDBOX_PKGS.add("org.mozilla.firefox");
-        PROTECTED_SANDBOX_PKGS.add("com.microsoft.emmx");
-        PROTECTED_SANDBOX_PKGS.add("com.sec.android.app.sbrowser");
-        PROTECTED_SANDBOX_PKGS.add("com.android.systemui");
-        PROTECTED_SANDBOX_PKGS.add("com.google.android.gms");
+    private IsolatedFoldShield() {
     }
 
-    private volatile Field fServiceInfo;
-    private volatile Field fAppInfo;
-    private volatile Field fDefiningUid;
-    private volatile Field fIsolatedProc;
-    private volatile Field fName;
-    private volatile Field fInstanceName;
-
-    public void install(XposedModule module, ClassLoader sysCl, PolicyEngine engine, TelemetryHub telemetry) {
-        Class<?> activeServicesCls;
-        Class<?> serviceRecordCls;
-        try {
-            activeServicesCls = Class.forName("com.android.server.am.ActiveServices", false, sysCl);
-            serviceRecordCls = Class.forName("com.android.server.am.ServiceRecord", false, sysCl);
-        } catch (Throwable t) {
-            Logger.e(TAG, "class load failed", t);
-            telemetry.markHookState(PolicyFlags.HOOK_BIT_ISO_FOLD, TelemetryHub.STATE_FAILED);
+    public static void install(
+        XposedInterface module,
+        ClassLoader cl,
+        final PolicyEngine engine,
+        final TelemetryHub hub
+    ) {
+        Class<?> activeServicesCls = CompatMatrix.findClass(cl, "com.android.server.am.ActiveServices");
+        final Class<?> serviceRecordCls = CompatMatrix.findClass(cl, "com.android.server.am.ServiceRecord");
+        if (activeServicesCls == null || serviceRecordCls == null) {
+            hub.setPillarStatus(PolicyFlags.PILLAR_ISO, TelemetryHub.HEALTH_OFF, CompatMatrix.TIER_NONE);
             return;
         }
 
-        fServiceInfo = findField(serviceRecordCls, "serviceInfo");
-        fAppInfo = findField(serviceRecordCls, "appInfo");
-        fDefiningUid = findField(serviceRecordCls, "definingUid");
-        fIsolatedProc = findField(serviceRecordCls, "isolatedProc");
-        fName = findField(serviceRecordCls, "name");
-        fInstanceName = findField(serviceRecordCls, "instanceName");
+        final Field fServiceInfo = CompatMatrix.findField(serviceRecordCls, "serviceInfo");
+        final Field fAppInfo = CompatMatrix.findField(serviceRecordCls, "appInfo");
+        final Field fPkgName = CompatMatrix.findField(serviceRecordCls, "packageName");
+        final Field fProcName = CompatMatrix.findField(serviceRecordCls, "processName");
+        final Field fInstanceName = CompatMatrix.findField(serviceRecordCls, "instanceName");
 
-        if (fServiceInfo == null || fAppInfo == null) {
-            telemetry.markHookState(PolicyFlags.HOOK_BIT_ISO_FOLD, TelemetryHub.STATE_FAILED);
+        List<Method> all = CompatMatrix.findMethodsByName(activeServicesCls, "bringUpServiceLocked");
+        List<Method> filtered = new ArrayList<Method>(all.size());
+        for (Method m : all) {
+            Class<?>[] pt = m.getParameterTypes();
+            if (pt.length > 0 && serviceRecordCls.isAssignableFrom(pt[0])) {
+                filtered.add(m);
+            }
+        }
+        if (filtered.isEmpty()) {
+            hub.setPillarStatus(PolicyFlags.PILLAR_ISO, TelemetryHub.HEALTH_OFF, CompatMatrix.TIER_NONE);
             return;
         }
 
-        int hooked = 0;
-        for (Method m : activeServicesCls.getDeclaredMethods()) {
-            if (!"bringUpServiceLocked".equals(m.getName())) {
-                continue;
-            }
-            Class<?>[] params = m.getParameterTypes();
-            if (params.length == 0 || !serviceRecordCls.isAssignableFrom(params[0])) {
-                continue;
-            }
-            try {
-                module.deoptimize(m);
-                module.hook(m)
-                        .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                        .intercept(chain -> {
-                            Object sr = chain.getArg(0);
-                            if (sr != null) {
-                                evaluateAndFold(sr, engine, telemetry);
-                            }
-                            return chain.proceed();
-                        });
-                hooked++;
-            } catch (Throwable t) {
-                Logger.e(TAG, "hook bringUpServiceLocked failed", t);
-            }
-        }
+        HookGuard guard = hub.createGuard(PolicyFlags.PILLAR_ISO, "ISO_FOLD");
+        int count = CompatMatrix.hookMethods(module, filtered, XposedInterface.PRIORITY_DEFAULT, guard, new HookGuard.Handler() {
+            @Override
+            public Object handle(XposedInterface.Chain chain) throws Throwable {
+                List<Object> args = chain.getArgs();
+                if (args.isEmpty() || fServiceInfo == null || fAppInfo == null) {
+                    return HookGuard.proceedOriginal(chain);
+                }
+                Object sr = args.get(0);
+                if (sr == null) {
+                    return HookGuard.proceedOriginal(chain);
+                }
+                ServiceInfo si = (ServiceInfo) fServiceInfo.get(sr);
+                ApplicationInfo ai = (ApplicationInfo) fAppInfo.get(sr);
+                if (si == null || ai == null) {
+                    return HookGuard.proceedOriginal(chain);
+                }
+                if ((si.flags & ServiceInfo.FLAG_ISOLATED_PROCESS) == 0) {
+                    return HookGuard.proceedOriginal(chain);
+                }
+                String pkg = fPkgName != null ? (String) fPkgName.get(sr) : ai.packageName;
+                int flags = engine.resolvePolicyForPackageOrUid(pkg, ai.uid);
+                if (!PolicyFlags.hasFlag(flags, PolicyFlags.FLAG_ISO_FOLD)) {
+                    return HookGuard.proceedOriginal(chain);
+                }
+                if ((si.flags & ServiceInfo.FLAG_EXTERNAL_SERVICE) != 0) {
+                    return HookGuard.proceedOriginal(chain);
+                }
+                if (isProtectedRenderer(pkg, si.processName, si.name)) {
+                    return HookGuard.proceedOriginal(chain);
+                }
+                if (fInstanceName != null) {
+                    Object inst = fInstanceName.get(sr);
+                    if (inst instanceof String && !((String) inst).isEmpty()) {
+                        return HookGuard.proceedOriginal(chain);
+                    }
+                }
+                if ((si.flags & ServiceInfo.FLAG_USE_APP_ZYGOTE) != 0
+                    && PolicyFlags.azMode(flags) == PolicyFlags.AZ_OFF
+                ) {
+                    return HookGuard.proceedOriginal(chain);
+                }
 
-        telemetry.markHookState(
-                PolicyFlags.HOOK_BIT_ISO_FOLD,
-                hooked > 0 ? TelemetryHub.STATE_OK : TelemetryHub.STATE_FAILED
+                int appId = PolicyEngine.toAppId(ai.uid);
+                if (PolicyFlags.isAuditOnly(flags)) {
+                    hub.record(appId, PolicyFlags.PILLAR_ISO, PolicyFlags.VEC_ISO_FOLD_MATCH, PolicyFlags.ACT_AUDIT, true, 0);
+                    return HookGuard.proceedOriginal(chain);
+                }
+
+                int origFlags = si.flags;
+                String origProc = fProcName != null ? (String) fProcName.get(sr) : null;
+                si.flags = origFlags & ~(ServiceInfo.FLAG_ISOLATED_PROCESS | ServiceInfo.FLAG_USE_APP_ZYGOTE);
+                if (fProcName != null && ai.processName != null && !ai.processName.isEmpty()) {
+                    fProcName.set(sr, ai.processName);
+                }
+                try {
+                    Object ret = HookGuard.proceedOriginal(chain);
+                    hub.record(appId, PolicyFlags.PILLAR_ISO, PolicyFlags.VEC_ISO_FOLD_SERVICE, PolicyFlags.ACT_FOLDED, false, 0);
+                    return ret;
+                } catch (Throwable t) {
+                    si.flags = origFlags;
+                    if (fProcName != null) {
+                        fProcName.set(sr, origProc);
+                    }
+                    throw t;
+                }
+            }
+        });
+
+        hub.setPillarStatus(
+            PolicyFlags.PILLAR_ISO,
+            count > 0 ? TelemetryHub.HEALTH_OK : TelemetryHub.HEALTH_OFF,
+            count > 0 ? CompatMatrix.TIER_OVERLOAD : CompatMatrix.TIER_NONE
         );
     }
 
-    private void evaluateAndFold(Object sr, PolicyEngine engine, TelemetryHub telemetry) {
-        try {
-            Object siObj = fServiceInfo.get(sr);
-            Object aiObj = fAppInfo.get(sr);
-            if (!(siObj instanceof ServiceInfo) || !(aiObj instanceof ApplicationInfo)) {
-                return;
-            }
-            ServiceInfo sInfo = (ServiceInfo) siObj;
-            ApplicationInfo aInfo = (ApplicationInfo) aiObj;
-
-            int sFlags = sInfo.flags;
-            if ((sFlags & FLAG_ISOLATED) == 0) {
-                return;
-            }
-            if ((sFlags & FLAG_EXTERNAL) != 0 || (sFlags & FLAG_APP_ZYGOTE) != 0) {
-                return;
-            }
-
-            if (fIsolatedProc != null && fIsolatedProc.get(sr) != null) {
-                return;
-            }
-
-            if (aInfo.uid < 10000 || aInfo.packageName == null) {
-                return;
-            }
-            if (PROTECTED_SANDBOX_PKGS.contains(aInfo.packageName)) {
-                return;
-            }
-
-            if (fDefiningUid != null) {
-                int defUid = fDefiningUid.getInt(sr);
-                if (defUid > 0 && defUid != aInfo.uid) {
-                    return;
-                }
-            }
-
-            if (fName != null && fInstanceName != null) {
-                Object nObj = fName.get(sr);
-                Object iObj = fInstanceName.get(sr);
-                if (nObj instanceof ComponentName && iObj instanceof ComponentName && !nObj.equals(iObj)) {
-                    return;
-                }
-            }
-
-            if (!engine.hasFlagForUidOrPackage(aInfo.uid, aInfo.packageName, PolicyFlags.FLAG_ISO_FOLD)) {
-                return;
-            }
-
-            sInfo.flags = sFlags & ~FLAG_ISOLATED;
-            telemetry.record(
-                    aInfo.uid % 100000,
-                    PolicyFlags.PILLAR_ISO_FOLD,
-                    PolicyFlags.VEC_ISO_SERVICE,
-                    PolicyFlags.ACT_FOLDED
-            );
-        } catch (Throwable ignored) {
-        }
+    public static boolean isProtectedRenderer(String pkg, String procName, String svcName) {
+        return containsRendererToken(pkg) || containsRendererToken(procName) || containsRendererToken(svcName);
     }
 
-    private static Field findField(Class<?> cls, String name) {
-        Class<?> cur = cls;
-        while (cur != null && cur != Object.class) {
-            try {
-                Field f = cur.getDeclaredField(name);
-                f.setAccessible(true);
-                return f;
-            } catch (NoSuchFieldException ignored) {
-                cur = cur.getSuperclass();
-            }
+    private static boolean containsRendererToken(String s) {
+        if (s == null || s.isEmpty()) {
+            return false;
         }
-        return null;
+        String low = s.toLowerCase(Locale.US);
+        return low.contains("webview")
+            || low.contains("trichrome")
+            || low.contains("chromium")
+            || low.contains("chrome")
+            || low.contains("sandboxed_process")
+            || low.contains("privileged_process");
     }
 }

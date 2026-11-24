@@ -7,150 +7,188 @@ import java.lang.reflect.Method;
 import java.util.List;
 
 import io.github.libxposed.api.XposedInterface;
-import io.github.libxposed.api.XposedModule;
-import io.github.taro902.isolationpolicy.core.Logger;
 import io.github.taro902.isolationpolicy.core.PolicyFlags;
 
 public final class UsbBroadcastShield {
 
-    private static final String TAG = "UsbBroadcastShield";
     private static final String ACTION_USB_STATE = "android.hardware.usb.action.USB_STATE";
     private static final long FUNCTION_ADB = 1L;
 
-    public void install(XposedModule module, ClassLoader sysCl, PolicyEngine engine, TelemetryHub telemetry) {
-        int amsHooked = hookActivityManagerStickyUsb(module, sysCl, engine, telemetry);
-        int usbHooked = hookUsbService(module, sysCl, engine, telemetry);
-
-        if (amsHooked > 0 && usbHooked > 0) {
-            telemetry.markHookState(PolicyFlags.HOOK_BIT_USB, TelemetryHub.STATE_OK);
-        } else if (amsHooked > 0 || usbHooked > 0) {
-            telemetry.markHookState(PolicyFlags.HOOK_BIT_USB, TelemetryHub.STATE_FALLBACK);
-        } else {
-            telemetry.markHookState(PolicyFlags.HOOK_BIT_USB, TelemetryHub.STATE_FAILED);
-        }
+    private UsbBroadcastShield() {
     }
 
-    private int hookActivityManagerStickyUsb(
-            XposedModule module,
-            ClassLoader sysCl,
-            PolicyEngine engine,
-            TelemetryHub telemetry
+    public static void install(
+        XposedInterface module,
+        ClassLoader cl,
+        final PolicyEngine engine,
+        final TelemetryHub hub
     ) {
-        int hooked = 0;
-        try {
-            Class<?> amsCls = Class.forName("com.android.server.am.ActivityManagerService", false, sysCl);
-            for (Method m : amsCls.getDeclaredMethods()) {
-                String name = m.getName();
-                if (!"registerReceiverWithFeature".equals(name) && !"registerReceiver".equals(name)) {
-                    continue;
-                }
-                if (m.getReturnType() != Intent.class) {
-                    continue;
-                }
-                try {
-                    module.hook(m)
-                            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                            .intercept(chain -> {
-                                int callingUid = Binder.getCallingUid();
-                                if (!engine.hasFlag(callingUid, PolicyFlags.FLAG_DEV_COHERENT)) {
-                                    return chain.proceed();
-                                }
-                                Object res = chain.proceed();
-                                if (!(res instanceof Intent)) {
-                                    return res;
-                                }
-                                Intent sticky = (Intent) res;
-                                if (!ACTION_USB_STATE.equals(sticky.getAction())) {
-                                    return sticky;
-                                }
-                                boolean hasAdb = sticky.getBooleanExtra("adb", false);
-                                boolean hasFuncAdb = sticky.getBooleanExtra("function_adb", false);
-                                if (!hasAdb && !hasFuncAdb) {
-                                    return sticky;
-                                }
-                                Intent clone = new Intent(sticky);
-                                if (hasAdb) {
-                                    clone.putExtra("adb", false);
-                                }
-                                if (hasFuncAdb) {
-                                    clone.putExtra("function_adb", false);
-                                }
-                                int appId = engine.resolveEffectiveAppId(callingUid);
-                                telemetry.record(appId, PolicyFlags.PILLAR_USB, PolicyFlags.VEC_USB_STICKY, PolicyFlags.ACT_SANITIZED);
-                                return clone;
-                            });
-                    hooked++;
-                } catch (Throwable t) {
-                    Logger.e(TAG, "hook registerReceiver failed", t);
-                }
+        int installed = 0;
+        int tier = CompatMatrix.TIER_EXACT;
+
+        CompatMatrix.ResolvedTarget regTarget = CompatMatrix.resolveTarget(
+            cl,
+            new String[]{"com.android.server.am.ActivityManagerService"},
+            "registerReceiverWithFeature",
+            null,
+            null
+        );
+        if (!regTarget.isResolved()) {
+            Class<?> amsCls = CompatMatrix.findClass(cl, "com.android.server.am.ActivityManagerService");
+            List<Method> legacyReg = CompatMatrix.findMethodsByName(amsCls, "registerReceiver");
+            if (!legacyReg.isEmpty()) {
+                regTarget = new CompatMatrix.ResolvedTarget(amsCls, legacyReg, CompatMatrix.TIER_FALLBACK);
+                tier = CompatMatrix.TIER_FALLBACK;
             }
-        } catch (Throwable t) {
-            Logger.e(TAG, "load ActivityManagerService failed", t);
         }
-        return hooked;
+
+        if (regTarget.isResolved()) {
+            HookGuard stickyGuard = hub.createGuard(PolicyFlags.PILLAR_USB, "USB_STICKY");
+            installed += CompatMatrix.hookMethods(module, regTarget.methods, XposedInterface.PRIORITY_DEFAULT, stickyGuard, new HookGuard.Handler() {
+                @Override
+                public Object handle(XposedInterface.Chain chain) throws Throwable {
+                    int callingUid = Binder.getCallingUid();
+                    int flags = engine.resolvePolicy(callingUid);
+                    if (!PolicyFlags.hasFlag(flags, PolicyFlags.FLAG_DEV_COHERENT)) {
+                        return HookGuard.proceedOriginal(chain);
+                    }
+                    Object ret = HookGuard.proceedOriginal(chain);
+                    if (!(ret instanceof Intent)) {
+                        return ret;
+                    }
+                    Intent orig = (Intent) ret;
+                    if (!ACTION_USB_STATE.equals(orig.getAction())) {
+                        return ret;
+                    }
+                    boolean hasAdb = orig.getBooleanExtra("adb", false)
+                        || orig.getBooleanExtra("adb_enabled", false)
+                        || orig.getBooleanExtra("function_adb", false);
+                    if (!hasAdb) {
+                        return ret;
+                    }
+                    int effAppId = engine.resolveEffectiveAppId(callingUid);
+                    if (PolicyFlags.isAuditOnly(flags)) {
+                        hub.record(effAppId, PolicyFlags.PILLAR_USB, PolicyFlags.VEC_USB_STICKY_INTENT, PolicyFlags.ACT_AUDIT, true, 0);
+                        return ret;
+                    }
+                    Intent cloned = new Intent(orig);
+                    cloned.putExtra("adb", false);
+                    cloned.putExtra("adb_enabled", false);
+                    cloned.putExtra("function_adb", false);
+                    hub.record(effAppId, PolicyFlags.PILLAR_USB, PolicyFlags.VEC_USB_STICKY_INTENT, PolicyFlags.ACT_SANITIZED, false, 0);
+                    return cloned;
+                }
+            });
+        }
+
+        Class<?> usbCls = CompatMatrix.findClass(cl, "com.android.server.usb.UsbService");
+        if (usbCls != null) {
+            Method mCur = CompatMatrix.findExactMethod(usbCls, "getCurrentFunctions");
+            Method mUnl = CompatMatrix.findExactMethod(usbCls, "getScreenUnlockedFunctions");
+            Method mIsEn = CompatMatrix.findExactMethod(usbCls, "isFunctionEnabled", String.class);
+
+            HookGuard fnGuard = hub.createGuard(PolicyFlags.PILLAR_USB, "USB_FUNCS");
+            if (mCur != null) {
+                installed += CompatMatrix.hookMethod(module, mCur, XposedInterface.PRIORITY_DEFAULT, fnGuard, buildFunctionMaskHandler(engine, hub, PolicyFlags.VEC_USB_CUR_FUNCS));
+            }
+            if (mUnl != null) {
+                installed += CompatMatrix.hookMethod(module, mUnl, XposedInterface.PRIORITY_DEFAULT, fnGuard, buildFunctionMaskHandler(engine, hub, PolicyFlags.VEC_USB_UNLOCKED_FUNCS));
+            }
+            if (mIsEn != null) {
+                HookGuard enGuard = hub.createGuard(PolicyFlags.PILLAR_USB, "USB_IS_EN");
+                installed += CompatMatrix.hookMethod(module, mIsEn, XposedInterface.PRIORITY_DEFAULT, enGuard, new HookGuard.Handler() {
+                    @Override
+                    public Object handle(XposedInterface.Chain chain) throws Throwable {
+                        int callingUid = Binder.getCallingUid();
+                        int flags = engine.resolvePolicy(callingUid);
+                        if (!PolicyFlags.hasFlag(flags, PolicyFlags.FLAG_DEV_COHERENT)) {
+                            return HookGuard.proceedOriginal(chain);
+                        }
+                        List<Object> args = chain.getArgs();
+                        if (args.isEmpty() || !"adb".equals(args.get(0))) {
+                            return HookGuard.proceedOriginal(chain);
+                        }
+                        Object ret = HookGuard.proceedOriginal(chain);
+                        if (!Boolean.TRUE.equals(ret)) {
+                            return ret;
+                        }
+                        int effAppId = engine.resolveEffectiveAppId(callingUid);
+                        if (PolicyFlags.isAuditOnly(flags)) {
+                            hub.record(effAppId, PolicyFlags.PILLAR_USB, PolicyFlags.VEC_USB_IS_ENABLED, PolicyFlags.ACT_AUDIT, true, 0);
+                            return ret;
+                        }
+                        hub.record(effAppId, PolicyFlags.PILLAR_USB, PolicyFlags.VEC_USB_IS_ENABLED, PolicyFlags.ACT_SANITIZED, false, 0);
+                        return Boolean.FALSE;
+                    }
+                });
+            }
+        }
+
+        Class<?> adbCls = CompatMatrix.findClass(cl, "com.android.server.adb.AdbService");
+        if (adbCls != null) {
+            Method mPort = CompatMatrix.findExactMethod(adbCls, "getAdbWirelessPort");
+            if (mPort != null) {
+                HookGuard adbGuard = hub.createGuard(PolicyFlags.PILLAR_USB, "ADB_WIFI");
+                CompatMatrix.hookMethod(module, mPort, XposedInterface.PRIORITY_DEFAULT, adbGuard, new HookGuard.Handler() {
+                    @Override
+                    public Object handle(XposedInterface.Chain chain) throws Throwable {
+                        int callingUid = Binder.getCallingUid();
+                        int flags = engine.resolvePolicy(callingUid);
+                        if (!PolicyFlags.hasFlag(flags, PolicyFlags.FLAG_DEV_COHERENT)) {
+                            return HookGuard.proceedOriginal(chain);
+                        }
+                        Object ret = HookGuard.proceedOriginal(chain);
+                        if (!(ret instanceof Integer) || (Integer) ret <= 0) {
+                            return ret;
+                        }
+                        int effAppId = engine.resolveEffectiveAppId(callingUid);
+                        if (PolicyFlags.isAuditOnly(flags)) {
+                            hub.record(effAppId, PolicyFlags.PILLAR_USB, PolicyFlags.VEC_USB_ADB_WIFI_PORT, PolicyFlags.ACT_AUDIT, true, (Integer) ret);
+                            return ret;
+                        }
+                        hub.record(effAppId, PolicyFlags.PILLAR_USB, PolicyFlags.VEC_USB_ADB_WIFI_PORT, PolicyFlags.ACT_SANITIZED, false, 0);
+                        return Integer.valueOf(0);
+                    }
+                });
+            }
+        }
+
+        hub.setPillarStatus(
+            PolicyFlags.PILLAR_USB,
+            installed > 0 ? (tier == CompatMatrix.TIER_FALLBACK ? TelemetryHub.HEALTH_FALLBACK : TelemetryHub.HEALTH_OK) : TelemetryHub.HEALTH_OFF,
+            installed > 0 ? tier : CompatMatrix.TIER_NONE
+        );
     }
 
-    private int hookUsbService(
-            XposedModule module,
-            ClassLoader sysCl,
-            PolicyEngine engine,
-            TelemetryHub telemetry
+    private static HookGuard.Handler buildFunctionMaskHandler(
+        final PolicyEngine engine,
+        final TelemetryHub hub,
+        final int vectorCode
     ) {
-        int hooked = 0;
-        try {
-            Class<?> usbCls = Class.forName("com.android.server.usb.UsbService", false, sysCl);
-            for (Method m : usbCls.getDeclaredMethods()) {
-                String name = m.getName();
-                if ("getCurrentFunctions".equals(name) && m.getParameterCount() == 0 && m.getReturnType() == long.class) {
-                    try {
-                        module.hook(m)
-                                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                                .intercept(chain -> {
-                                    int callingUid = Binder.getCallingUid();
-                                    if (!engine.hasFlag(callingUid, PolicyFlags.FLAG_DEV_COHERENT)) {
-                                        return chain.proceed();
-                                    }
-                                    Object res = chain.proceed();
-                                    if (res instanceof Long) {
-                                        long mask = (Long) res;
-                                        if ((mask & FUNCTION_ADB) != 0L) {
-                                            int appId = engine.resolveEffectiveAppId(callingUid);
-                                            telemetry.record(appId, PolicyFlags.PILLAR_USB, PolicyFlags.VEC_USB_FUNCS, PolicyFlags.ACT_CLEARED);
-                                            return mask & ~FUNCTION_ADB;
-                                        }
-                                    }
-                                    return res;
-                                });
-                        hooked++;
-                    } catch (Throwable t) {
-                        Logger.e(TAG, "hook getCurrentFunctions failed", t);
-                    }
-                } else if ("isFunctionEnabled".equals(name) && m.getParameterCount() == 1 && m.getParameterTypes()[0] == String.class) {
-                    try {
-                        module.hook(m)
-                                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                                .intercept(chain -> {
-                                    int callingUid = Binder.getCallingUid();
-                                    if (!engine.hasFlag(callingUid, PolicyFlags.FLAG_DEV_COHERENT)) {
-                                        return chain.proceed();
-                                    }
-                                    List<Object> args = chain.getArgs();
-                                    if (!args.isEmpty() && "adb".equals(args.get(0))) {
-                                        int appId = engine.resolveEffectiveAppId(callingUid);
-                                        telemetry.record(appId, PolicyFlags.PILLAR_USB, PolicyFlags.VEC_USB_FUNCS, PolicyFlags.ACT_CLEARED);
-                                        return Boolean.FALSE;
-                                    }
-                                    return chain.proceed();
-                                });
-                        hooked++;
-                    } catch (Throwable t) {
-                        Logger.e(TAG, "hook isFunctionEnabled failed", t);
-                    }
+        return new HookGuard.Handler() {
+            @Override
+            public Object handle(XposedInterface.Chain chain) throws Throwable {
+                int callingUid = Binder.getCallingUid();
+                int flags = engine.resolvePolicy(callingUid);
+                if (!PolicyFlags.hasFlag(flags, PolicyFlags.FLAG_DEV_COHERENT)) {
+                    return HookGuard.proceedOriginal(chain);
                 }
+                Object ret = HookGuard.proceedOriginal(chain);
+                if (!(ret instanceof Long)) {
+                    return ret;
+                }
+                long fn = (Long) ret;
+                if ((fn & FUNCTION_ADB) == 0L) {
+                    return ret;
+                }
+                int effAppId = engine.resolveEffectiveAppId(callingUid);
+                if (PolicyFlags.isAuditOnly(flags)) {
+                    hub.record(effAppId, PolicyFlags.PILLAR_USB, vectorCode, PolicyFlags.ACT_AUDIT, true, 0);
+                    return ret;
+                }
+                hub.record(effAppId, PolicyFlags.PILLAR_USB, vectorCode, PolicyFlags.ACT_SANITIZED, false, 0);
+                return Long.valueOf(fn & ~FUNCTION_ADB);
             }
-        } catch (Throwable t) {
-            Logger.e(TAG, "load UsbService failed", t);
-        }
-        return hooked;
+        };
     }
 }

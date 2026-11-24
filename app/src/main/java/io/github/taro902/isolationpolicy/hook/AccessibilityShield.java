@@ -4,253 +4,193 @@ import android.os.Binder;
 import android.os.IBinder;
 import android.os.IInterface;
 
-import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
-import java.util.WeakHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 import io.github.libxposed.api.XposedInterface;
-import io.github.libxposed.api.XposedModule;
-import io.github.taro902.isolationpolicy.core.Logger;
 import io.github.taro902.isolationpolicy.core.PolicyFlags;
 
 public final class AccessibilityShield {
 
-    private static final String TAG = "AccessibilityShield";
-    private static final int A11Y_STATE_CLEAR_MASK = 0x01 | 0x02 | 0x08 | 0x10;
+    private static final int A11Y_STATE_STRIP_MASK = 0x1B;
+    private static final int MAX_CLIENT_TRACK = 512;
 
-    private final Map<IBinder, Integer> clientBinderUidMap = Collections.synchronizedMap(new WeakHashMap<>());
-    private volatile Method mParceledEmptyList;
-    private volatile Constructor<?> cParceledListCtor;
-
-    public void install(XposedModule module, ClassLoader sysCl, PolicyEngine engine, TelemetryHub telemetry) {
-        resolveParceledListSlice(sysCl);
-
-        int coreHooks = 0;
-        int pushHooks = 0;
-
-        try {
-            Class<?> amsCls = Class.forName("com.android.server.accessibility.AccessibilityManagerService", false, sysCl);
-            for (Method m : amsCls.getDeclaredMethods()) {
-                String name = m.getName();
-                if ("addClient".equals(name) && m.getReturnType() == long.class) {
-                    if (hookAddClient(module, m, engine, telemetry)) {
-                        coreHooks++;
-                    }
-                } else if ("getEnabledAccessibilityServiceList".equals(name)) {
-                    if (hookServiceList(module, m, PolicyFlags.VEC_A11Y_ENABLED, engine, telemetry)) {
-                        coreHooks++;
-                    }
-                } else if ("getInstalledAccessibilityServiceList".equals(name)) {
-                    if (hookServiceList(module, m, PolicyFlags.VEC_A11Y_INSTALLED, engine, telemetry)) {
-                        coreHooks++;
-                    }
-                } else if ("getAccessibilityShortcutTargets".equals(name)) {
-                    hookShortcutTargets(module, m, engine);
-                }
-            }
-        } catch (Throwable t) {
-            Logger.e(TAG, "load AccessibilityManagerService failed", t);
-        }
-
-        try {
-            Class<?> proxyCls = Class.forName(
-                    "android.view.accessibility.IAccessibilityManagerClient$Stub$Proxy",
-                    false,
-                    sysCl
-            );
-            for (Method m : proxyCls.getDeclaredMethods()) {
-                if ("setState".equals(m.getName()) && m.getParameterCount() == 1 && m.getParameterTypes()[0] == int.class) {
-                    if (hookClientSetState(module, m, engine, telemetry)) {
-                        pushHooks++;
-                    }
-                }
-            }
-        } catch (Throwable t) {
-            Logger.e(TAG, "hook IAccessibilityManagerClient proxy failed", t);
-        }
-
-        if (coreHooks >= 3 && pushHooks > 0) {
-            telemetry.markHookState(PolicyFlags.HOOK_BIT_A11Y, TelemetryHub.STATE_OK);
-        } else if (coreHooks > 0) {
-            telemetry.markHookState(PolicyFlags.HOOK_BIT_A11Y, TelemetryHub.STATE_FALLBACK);
-        } else {
-            telemetry.markHookState(PolicyFlags.HOOK_BIT_A11Y, TelemetryHub.STATE_FAILED);
-        }
+    private AccessibilityShield() {
     }
 
-    private boolean hookAddClient(
-            XposedModule module,
-            Method m,
-            PolicyEngine engine,
-            TelemetryHub telemetry
+    public static void install(
+        XposedInterface module,
+        final ClassLoader cl,
+        final PolicyEngine engine,
+        final TelemetryHub hub
     ) {
-        try {
-            module.deoptimize(m);
-            module.hook(m)
-                    .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                    .intercept(chain -> {
-                        int callingUid = Binder.getCallingUid();
-                        if (callingUid >= 10000) {
-                            List<Object> args = chain.getArgs();
-                            if (!args.isEmpty() && args.get(0) instanceof IInterface) {
-                                IBinder binder = ((IInterface) args.get(0)).asBinder();
-                                if (binder != null) {
-                                    clientBinderUidMap.put(binder, callingUid);
-                                }
-                            }
-                        }
-
-                        Object res = chain.proceed();
-                        if (!(res instanceof Long)) {
-                            return res;
-                        }
-                        if (!engine.hasFlag(callingUid, PolicyFlags.FLAG_A11Y_COHERENT)) {
-                            return res;
-                        }
-
-                        long packed = (Long) res;
-                        int state = (int) (packed >> 32);
-                        int events = (int) packed;
-                        int cleanState = state & ~A11Y_STATE_CLEAR_MASK;
-                        if (cleanState != state) {
-                            int appId = engine.resolveEffectiveAppId(callingUid);
-                            telemetry.record(appId, PolicyFlags.PILLAR_A11Y, PolicyFlags.VEC_A11Y_CLIENT, PolicyFlags.ACT_SANITIZED);
-                            return (((long) cleanState) << 32) | (events & 0xFFFFFFFFL);
-                        }
-                        return res;
-                    });
-            return true;
-        } catch (Throwable t) {
-            Logger.e(TAG, "hook addClient failed", t);
-            return false;
-        }
-    }
-
-    private boolean hookServiceList(
-            XposedModule module,
-            Method m,
-            int vectorCode,
-            PolicyEngine engine,
-            TelemetryHub telemetry
-    ) {
-        final boolean returnsParceled = m.getReturnType().getName().endsWith("ParceledListSlice");
-        try {
-            module.deoptimize(m);
-            module.hook(m)
-                    .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                    .intercept(chain -> {
-                        int callingUid = Binder.getCallingUid();
-                        if (!engine.hasFlag(callingUid, PolicyFlags.FLAG_A11Y_COHERENT)) {
-                            return chain.proceed();
-                        }
-                        int appId = engine.resolveEffectiveAppId(callingUid);
-                        telemetry.record(appId, PolicyFlags.PILLAR_A11Y, vectorCode, PolicyFlags.ACT_CLEARED);
-                        if (returnsParceled) {
-                            Object emptySlice = newEmptyParceledSlice();
-                            if (emptySlice != null) {
-                                return emptySlice;
-                            }
-                            return chain.proceed();
-                        }
-                        return Collections.emptyList();
-                    });
-            return true;
-        } catch (Throwable t) {
-            Logger.e(TAG, "hook service list failed", t);
-            return false;
-        }
-    }
-
-    private void hookShortcutTargets(XposedModule module, Method m, PolicyEngine engine) {
-        if (!List.class.isAssignableFrom(m.getReturnType())) {
+        Class<?> amsCls = CompatMatrix.findClass(cl, "com.android.server.accessibility.AccessibilityManagerService");
+        if (amsCls == null) {
+            hub.setPillarStatus(PolicyFlags.PILLAR_A11Y, TelemetryHub.HEALTH_OFF, CompatMatrix.TIER_NONE);
             return;
         }
-        try {
-            module.hook(m)
-                    .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                    .intercept(chain -> {
-                        int callingUid = Binder.getCallingUid();
-                        if (engine.hasFlag(callingUid, PolicyFlags.FLAG_A11Y_COHERENT)) {
-                            return Collections.emptyList();
-                        }
-                        return chain.proceed();
-                    });
-        } catch (Throwable ignored) {
-        }
-    }
 
-    private boolean hookClientSetState(
-            XposedModule module,
-            Method m,
-            PolicyEngine engine,
-            TelemetryHub telemetry
-    ) {
-        try {
-            module.hook(m)
-                    .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                    .intercept(chain -> {
-                        Object receiver = chain.getThisObject();
-                        if (!(receiver instanceof IInterface)) {
-                            return chain.proceed();
+        final ConcurrentHashMap<IBinder, Integer> trackedClients = new ConcurrentHashMap<IBinder, Integer>(64);
+        int installed = 0;
+
+        List<Method> addClientMethods = CompatMatrix.findMethodsByName(amsCls, "addClient");
+        HookGuard addGuard = hub.createGuard(PolicyFlags.PILLAR_A11Y, "A11Y_ADD");
+        installed += CompatMatrix.hookMethods(module, addClientMethods, XposedInterface.PRIORITY_DEFAULT, addGuard, new HookGuard.Handler() {
+            @Override
+            public Object handle(XposedInterface.Chain chain) throws Throwable {
+                int callingUid = Binder.getCallingUid();
+                int flags = engine.resolvePolicy(callingUid);
+                if (!PolicyFlags.hasFlag(flags, PolicyFlags.FLAG_A11Y_COHERENT)) {
+                    return HookGuard.proceedOriginal(chain);
+                }
+                int effAppId = engine.resolveEffectiveAppId(callingUid);
+                List<Object> args = chain.getArgs();
+                if (!args.isEmpty() && args.get(0) instanceof IInterface && effAppId >= PolicyEngine.FIRST_APP_UID) {
+                    IBinder binder = ((IInterface) args.get(0)).asBinder();
+                    if (binder != null) {
+                        if (trackedClients.size() >= MAX_CLIENT_TRACK) {
+                            trackedClients.clear();
                         }
-                        IBinder binder = ((IInterface) receiver).asBinder();
-                        Integer clientUid = binder != null ? clientBinderUidMap.get(binder) : null;
-                        if (clientUid == null || !engine.hasFlag(clientUid, PolicyFlags.FLAG_A11Y_COHERENT)) {
-                            return chain.proceed();
+                        trackedClients.put(binder, Integer.valueOf(effAppId));
+                    }
+                }
+                Object ret = HookGuard.proceedOriginal(chain);
+                if (!(ret instanceof Long)) {
+                    return ret;
+                }
+                long pair = (Long) ret;
+                int state = (int) (pair & 0xFFFFFFFFL);
+                if ((state & A11Y_STATE_STRIP_MASK) == 0) {
+                    return ret;
+                }
+                if (PolicyFlags.isAuditOnly(flags)) {
+                    hub.record(effAppId, PolicyFlags.PILLAR_A11Y, PolicyFlags.VEC_A11Y_ADD_CLIENT, PolicyFlags.ACT_AUDIT, true, state & A11Y_STATE_STRIP_MASK);
+                    return ret;
+                }
+                int clean = state & ~A11Y_STATE_STRIP_MASK;
+                long patched = (pair & 0xFFFFFFFF00000000L) | (clean & 0xFFFFFFFFL);
+                hub.record(effAppId, PolicyFlags.PILLAR_A11Y, PolicyFlags.VEC_A11Y_ADD_CLIENT, PolicyFlags.ACT_SANITIZED, false, state & A11Y_STATE_STRIP_MASK);
+                return Long.valueOf(patched);
+            }
+        });
+
+        List<Method> enMethods = CompatMatrix.findMethodsByName(amsCls, "getEnabledAccessibilityServiceList");
+        HookGuard listGuard = hub.createGuard(PolicyFlags.PILLAR_A11Y, "A11Y_LIST");
+        installed += CompatMatrix.hookMethods(module, enMethods, XposedInterface.PRIORITY_DEFAULT, listGuard, buildServiceListHandler(cl, engine, hub, PolicyFlags.VEC_A11Y_ENABLED_LIST));
+
+        List<Method> instMethods = CompatMatrix.findMethodsByName(amsCls, "getInstalledAccessibilityServiceList");
+        installed += CompatMatrix.hookMethods(module, instMethods, XposedInterface.PRIORITY_DEFAULT, listGuard, buildServiceListHandler(cl, engine, hub, PolicyFlags.VEC_A11Y_INSTALLED_LIST));
+
+        List<Method> shortMethods = CompatMatrix.findMethodsByName(amsCls, "getAccessibilityShortcutTargets");
+        HookGuard shortGuard = hub.createGuard(PolicyFlags.PILLAR_A11Y, "A11Y_SHORT");
+        CompatMatrix.hookMethods(module, shortMethods, XposedInterface.PRIORITY_DEFAULT, shortGuard, new HookGuard.Handler() {
+            @Override
+            public Object handle(XposedInterface.Chain chain) throws Throwable {
+                int callingUid = Binder.getCallingUid();
+                int flags = engine.resolvePolicy(callingUid);
+                if (!PolicyFlags.hasFlag(flags, PolicyFlags.FLAG_A11Y_COHERENT)) {
+                    return HookGuard.proceedOriginal(chain);
+                }
+                int effAppId = engine.resolveEffectiveAppId(callingUid);
+                if (PolicyFlags.isAuditOnly(flags)) {
+                    Object ret = HookGuard.proceedOriginal(chain);
+                    List<?> list = CompatMatrix.extractParceledList(ret);
+                    if (list != null && !list.isEmpty()) {
+                        hub.record(effAppId, PolicyFlags.PILLAR_A11Y, PolicyFlags.VEC_A11Y_SHORTCUTS, PolicyFlags.ACT_AUDIT, true, list.size());
+                    }
+                    return ret;
+                }
+                hub.record(effAppId, PolicyFlags.PILLAR_A11Y, PolicyFlags.VEC_A11Y_SHORTCUTS, PolicyFlags.ACT_SANITIZED, false, 0);
+                Object exec = chain.getExecutable();
+                if (exec instanceof Method && List.class.isAssignableFrom(((Method) exec).getReturnType())) {
+                    return Collections.emptyList();
+                }
+                Object emptySlice = CompatMatrix.wrapParceledList(cl, Collections.emptyList());
+                return emptySlice != null ? emptySlice : HookGuard.proceedOriginal(chain);
+            }
+        });
+
+        Class<?> proxyCls = CompatMatrix.findClass(cl, "android.view.accessibility.IAccessibilityManagerClient$Stub$Proxy");
+        if (proxyCls != null) {
+            Method setState = CompatMatrix.findExactMethod(proxyCls, "setState", int.class);
+            if (setState != null) {
+                HookGuard pushGuard = hub.createGuard(PolicyFlags.PILLAR_A11Y, "A11Y_PUSH");
+                CompatMatrix.hookMethod(module, setState, XposedInterface.PRIORITY_DEFAULT, pushGuard, new HookGuard.Handler() {
+                    @Override
+                    public Object handle(XposedInterface.Chain chain) throws Throwable {
+                        Object self = chain.getThisObject();
+                        if (!(self instanceof IInterface)) {
+                            return HookGuard.proceedOriginal(chain);
+                        }
+                        IBinder binder = ((IInterface) self).asBinder();
+                        Integer ownerAppId = binder != null ? trackedClients.get(binder) : null;
+                        if (ownerAppId == null) {
+                            return HookGuard.proceedOriginal(chain);
+                        }
+                        int flags = engine.resolvePolicy(ownerAppId);
+                        if (!PolicyFlags.hasFlag(flags, PolicyFlags.FLAG_A11Y_COHERENT)) {
+                            return HookGuard.proceedOriginal(chain);
                         }
                         List<Object> args = chain.getArgs();
-                        if (!args.isEmpty() && args.get(0) instanceof Integer) {
-                            int stateFlags = (Integer) args.get(0);
-                            int clean = stateFlags & ~A11Y_STATE_CLEAR_MASK;
-                            if (clean != stateFlags) {
-                                int appId = engine.resolveEffectiveAppId(clientUid);
-                                telemetry.record(appId, PolicyFlags.PILLAR_A11Y, PolicyFlags.VEC_A11Y_PUSH, PolicyFlags.ACT_SANITIZED);
-                                return chain.proceed(new Object[]{clean});
-                            }
+                        if (args.isEmpty() || !(args.get(0) instanceof Integer)) {
+                            return HookGuard.proceedOriginal(chain);
                         }
-                        return chain.proceed();
-                    });
-            return true;
-        } catch (Throwable t) {
-            Logger.e(TAG, "hook setState failed", t);
-            return false;
+                        int state = (Integer) args.get(0);
+                        if ((state & A11Y_STATE_STRIP_MASK) == 0) {
+                            return HookGuard.proceedOriginal(chain);
+                        }
+                        if (PolicyFlags.isAuditOnly(flags)) {
+                            hub.record(ownerAppId, PolicyFlags.PILLAR_A11Y, PolicyFlags.VEC_A11Y_PUSH_STATE, PolicyFlags.ACT_AUDIT, true, state & A11Y_STATE_STRIP_MASK);
+                            return HookGuard.proceedOriginal(chain);
+                        }
+                        int clean = state & ~A11Y_STATE_STRIP_MASK;
+                        hub.record(ownerAppId, PolicyFlags.PILLAR_A11Y, PolicyFlags.VEC_A11Y_PUSH_STATE, PolicyFlags.ACT_SANITIZED, false, state & A11Y_STATE_STRIP_MASK);
+                        return HookGuard.proceedWithArgs(chain, new Object[]{Integer.valueOf(clean)});
+                    }
+                });
+            }
         }
+
+        hub.setPillarStatus(
+            PolicyFlags.PILLAR_A11Y,
+            installed > 0 ? TelemetryHub.HEALTH_OK : TelemetryHub.HEALTH_OFF,
+            installed > 0 ? CompatMatrix.TIER_EXACT : CompatMatrix.TIER_NONE
+        );
     }
 
-    private void resolveParceledListSlice(ClassLoader sysCl) {
-        try {
-            Class<?> sliceCls = Class.forName("android.content.pm.ParceledListSlice", false, sysCl);
-            try {
-                Method empty = sliceCls.getDeclaredMethod("emptyList");
-                empty.setAccessible(true);
-                mParceledEmptyList = empty;
-            } catch (NoSuchMethodException ignored) {
+    private static HookGuard.Handler buildServiceListHandler(
+        final ClassLoader cl,
+        final PolicyEngine engine,
+        final TelemetryHub hub,
+        final int vectorCode
+    ) {
+        return new HookGuard.Handler() {
+            @Override
+            public Object handle(XposedInterface.Chain chain) throws Throwable {
+                int callingUid = Binder.getCallingUid();
+                int flags = engine.resolvePolicy(callingUid);
+                if (!PolicyFlags.hasFlag(flags, PolicyFlags.FLAG_A11Y_COHERENT)) {
+                    return HookGuard.proceedOriginal(chain);
+                }
+                int effAppId = engine.resolveEffectiveAppId(callingUid);
+                if (PolicyFlags.isAuditOnly(flags)) {
+                    Object ret = HookGuard.proceedOriginal(chain);
+                    List<?> list = CompatMatrix.extractParceledList(ret);
+                    if (list != null && !list.isEmpty()) {
+                        hub.record(effAppId, PolicyFlags.PILLAR_A11Y, vectorCode, PolicyFlags.ACT_AUDIT, true, list.size());
+                    }
+                    return ret;
+                }
+                hub.record(effAppId, PolicyFlags.PILLAR_A11Y, vectorCode, PolicyFlags.ACT_SANITIZED, false, 0);
+                Object exec = chain.getExecutable();
+                if (exec instanceof Method && List.class.isAssignableFrom(((Method) exec).getReturnType())) {
+                    return Collections.emptyList();
+                }
+                Object emptySlice = CompatMatrix.wrapParceledList(cl, Collections.emptyList());
+                return emptySlice != null ? emptySlice : HookGuard.proceedOriginal(chain);
             }
-            try {
-                Constructor<?> ctor = sliceCls.getDeclaredConstructor(List.class);
-                ctor.setAccessible(true);
-                cParceledListCtor = ctor;
-            } catch (NoSuchMethodException ignored) {
-            }
-        } catch (Throwable ignored) {
-        }
-    }
-
-    private Object newEmptyParceledSlice() {
-        try {
-            Method m = mParceledEmptyList;
-            if (m != null) {
-                return m.invoke(null);
-            }
-            Constructor<?> c = cParceledListCtor;
-            if (c != null) {
-                return c.newInstance(Collections.emptyList());
-            }
-        } catch (Throwable ignored) {
-        }
-        return null;
+        };
     }
 }
