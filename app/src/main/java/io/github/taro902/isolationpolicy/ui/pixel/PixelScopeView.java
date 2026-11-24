@@ -93,8 +93,7 @@ public final class PixelScopeView extends View {
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        int h = m.dp(118);
-        setMeasuredDimension(resolveSize(m.dp(340), widthMeasureSpec), resolveSize(h, heightMeasureSpec));
+        setMeasuredDimension(resolveSize(m.dp(340), widthMeasureSpec), resolveSize(m.dp(158), heightMeasureSpec));
     }
 
     @Override
@@ -102,7 +101,7 @@ public final class PixelScopeView extends View {
         int w = getWidth();
         int h = getHeight();
         int u = m.u;
-        if (w < u * 24 || h < u * 16) {
+        if (w < u * 24 || h < u * 20) {
             return;
         }
 
@@ -110,22 +109,23 @@ public final class PixelScopeView extends View {
 
         int hudTop = u * 3;
         int sc = m.microScale;
-        int mh = PixelFont.microHeight(sc);
-        PixelFont.drawMicro(canvas, "ENF " + totalEnf, u * 3, hudTop, sc, palette.accent, paint);
-        int audX = u * 3 + PixelFont.measureMicroWidth("ENF " + totalEnf, sc) + u * 4;
-        PixelFont.drawMicro(canvas, "AUD " + totalAud, audX, hudTop, sc, palette.audit, paint);
+        int lh = PixelFont.lineHeight(sc);
+        String enfTxt = "ENF " + totalEnf;
+        PixelFont.drawText(canvas, enfTxt, u * 3, hudTop, sc, palette.accent, paint);
+        int audX = u * 3 + PixelFont.measureWidth(enfTxt, sc) + u * 4;
+        PixelFont.drawText(canvas, "AUD " + totalAud, audX, hudTop, sc, palette.audit, paint);
 
         String rightHud = "RING " + ringCount + "/" + TelemetryHub.RING_SIZE;
-        int rw = PixelFont.measureMicroWidth(rightHud, sc);
-        PixelFont.drawMicro(canvas, rightHud, w - u * 3 - rw, hudTop, sc, palette.inkMuted, paint);
+        int rw = PixelFont.measureWidth(rightHud, sc);
+        PixelFont.drawText(canvas, rightHud, w - u * 3 - rw, hudTop, sc, palette.inkMuted, paint);
 
         int plotLeft = u * 3;
         int plotRight = w - u * 3;
-        int plotTop = hudTop + mh + u * 3;
+        int plotTop = hudTop + lh + u * 3;
         int plotBottom = h - u * 3;
         int plotW = plotRight - plotLeft;
         int plotH = plotBottom - plotTop;
-        if (plotW <= 0 || plotH <= u * 4) {
+        if (plotW <= 0 || plotH <= u * 6) {
             return;
         }
 
@@ -133,7 +133,7 @@ public final class PixelScopeView extends View {
         for (int row = 1; row <= 3; row++) {
             int gy = plotTop + (plotH * row) / 4;
             for (int gx = plotLeft; gx < plotRight; gx += u * 3) {
-                canvas.drawRect(gx, gy, Math.min(plotRight, gx + u), gy + Math.max(1, u / 2), paint);
+                canvas.drawRect(gx, gy, Math.min(plotRight, gx + u), gy + Math.max(2, u / 2), paint);
             }
         }
 

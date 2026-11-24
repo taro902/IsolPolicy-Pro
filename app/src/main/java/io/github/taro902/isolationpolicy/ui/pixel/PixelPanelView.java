@@ -46,13 +46,13 @@ public final class PixelPanelView extends LinearLayout {
         if (headerTitle.isEmpty() && headerRight.isEmpty()) {
             return 0;
         }
-        return PixelFont.lineHeight(m.smallFontScale) + m.u * 5;
+        return PixelFont.lineHeight(m.smallFontScale) + m.u * 7;
     }
 
     private void updatePadding() {
         int u = m.u;
         int topExtra = headerHeight();
-        setPadding(u * 4, u * 3 + topExtra, u * 5, u * 4);
+        setPadding(u * 4, u * 4 + topExtra, u * 6, u * 6);
     }
 
     @Override
@@ -60,7 +60,7 @@ public final class PixelPanelView extends LinearLayout {
         int w = getWidth();
         int h = getHeight();
         int u = m.u;
-        if (w < u * 6 || h < u * 6) {
+        if (w < u * 8 || h < u * 8) {
             return;
         }
         PixelDraw.drawCard(canvas, 0, 0, w, h, u, palette, highlighted, paint);
@@ -69,21 +69,28 @@ public final class PixelPanelView extends LinearLayout {
         if (hh > 0) {
             int barLeft = u;
             int barTop = u;
-            int barRight = w - u * 2;
+            int barRight = w - u * 3;
             int barBottom = barTop + hh;
             PixelDraw.drawBayerFill(canvas, barLeft, barTop, barRight, barBottom, palette.surfaceAlt, palette.ditherDot, 4, u, paint);
             PixelDraw.drawDivider(canvas, barLeft, barBottom - u, barRight, u, palette.border, paint);
 
-            int sc = m.smallFontScale;
-            int th = PixelFont.lineHeight(sc);
-            int ty = barTop + (hh - u - th) / 2;
+            int rvY = barTop + (hh - u - u * 2) / 2;
+            PixelDraw.drawRivet(canvas, barLeft + u * 2, rvY, u, palette.borderHi, palette.shadow, paint);
+
+            int rw = !headerRight.isEmpty() ? PixelFont.measureWidth(headerRight, m.microScale) : 0;
+            int rightReserve = rw > 0 ? (rw + u * 5) : (u * 3);
+            int titleLeft = barLeft + u * 6;
+            int maxTitleW = Math.max(0, barRight - rightReserve - titleLeft);
+
             if (!headerTitle.isEmpty()) {
-                PixelFont.drawText(canvas, headerTitle, barLeft + u * 3, ty, sc, palette.accent, paint);
+                int sc = PixelFont.measureWidth(headerTitle, m.smallFontScale) <= maxTitleW ? m.smallFontScale : m.microScale;
+                int ty = barTop + (hh - u - PixelFont.lineHeight(sc)) / 2;
+                String fitT = PixelFont.fitText(headerTitle, maxTitleW, sc);
+                PixelFont.drawTextWithShadow(canvas, fitT, titleLeft, ty, sc, palette.accent, palette.shadow, paint);
             }
             if (!headerRight.isEmpty()) {
-                int rw = PixelFont.measureMicroWidth(headerRight, m.microScale);
-                int ry = barTop + (hh - u - PixelFont.microHeight(m.microScale)) / 2;
-                PixelFont.drawMicro(canvas, headerRight, barRight - u * 3 - rw, ry, m.microScale, palette.inkMuted, paint);
+                int ry = barTop + (hh - u - PixelFont.lineHeight(m.microScale)) / 2;
+                PixelFont.drawText(canvas, headerRight, barRight - u * 3 - rw, ry, m.microScale, palette.inkMuted, paint);
             }
         }
     }

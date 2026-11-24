@@ -19,17 +19,17 @@ public final class PixelMetrics {
 
     private PixelMetrics(float density) {
         this.density = density > 0f ? density : 2.75f;
-        int rawU = Math.round(this.density * 1.12f);
-        this.u = Math.max(2, Math.min(4, rawU));
+        int rawU = Math.round(this.density * 1.45f);
+        this.u = Math.max(3, Math.min(5, rawU));
         this.border = this.u;
-        this.shadow = this.u;
+        this.shadow = this.u * 2;
         this.padSm = this.u * 2;
         this.padMd = this.u * 3;
         this.padLg = this.u * 4;
-        this.microScale = Math.max(2, this.u);
-        this.smallFontScale = Math.max(2, this.u - 1);
-        this.fontScale = this.u;
-        this.titleFontScale = this.u + 1;
+        this.microScale = Math.max(2, this.u - 1);
+        this.smallFontScale = this.u;
+        this.fontScale = this.u + 1;
+        this.titleFontScale = this.u + 2;
         this.keycapLip = this.u * 2;
     }
 

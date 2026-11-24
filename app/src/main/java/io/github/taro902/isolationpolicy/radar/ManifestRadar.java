@@ -250,7 +250,7 @@ public final class ManifestRadar {
         if (lib.contains("sgmain") || lib.contains("sgsecurity") || lib.contains("sgmisc") || lib.contains("apdid") || lib.contains("zoloz") || lib.contains("alipay")) {
             return "ALIPAY";
         }
-        if (lib.contains("voswrapper") || lib.contains("vguard") || lib.contains("vkey")) {
+        if (lib.contains("voswrapper") || lib.contains("vguard") || lib.contains("libvkey")) {
             return "VKEY";
         }
         if (lib.contains("promon") || lib.contains("libshield")) {

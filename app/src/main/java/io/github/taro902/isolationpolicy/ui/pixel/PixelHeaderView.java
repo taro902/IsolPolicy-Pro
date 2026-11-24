@@ -26,8 +26,8 @@ public final class PixelHeaderView extends View {
     private OnPaletteTapListener paletteListener;
 
     private int status = STATUS_OFFLINE;
-    private String versionText = "2.2.0";
-    private String subtitleLine = "OFFLINE  HOOKS 0/10";
+    private String versionText = "2.2.1";
+    private String subtitleLine = "IPC WAIT  GUARD 0";
     private String hooksBadge = "0/10";
     private int paletteBtnLeft = 0;
 
@@ -56,7 +56,7 @@ public final class PixelHeaderView extends View {
         long enforcedHits,
         long auditHits
     ) {
-        this.versionText = (version != null && !version.isEmpty()) ? version : "2.2.0";
+        this.versionText = (version != null && !version.isEmpty()) ? version : "2.2.1";
         this.hooksBadge = healthyHooks + "/" + PolicyFlags.PILLAR_COUNT;
         if (!connected) {
             this.status = STATUS_OFFLINE;
@@ -76,8 +76,7 @@ public final class PixelHeaderView extends View {
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        int u = m.u;
-        int h = Math.max(u * 21, 16 * Math.max(2, u - 1) + u * 8);
+        int h = m.dp(68);
         setMeasuredDimension(resolveSize(m.dp(360), widthMeasureSpec), resolveSize(h, heightMeasureSpec));
     }
 
@@ -103,7 +102,7 @@ public final class PixelHeaderView extends View {
         int w = getWidth();
         int h = getHeight();
         int u = m.u;
-        if (w < u * 20 || h < u * 12) {
+        if (w < u * 24 || h < u * 16) {
             return;
         }
 
@@ -131,66 +130,72 @@ public final class PixelHeaderView extends View {
                 break;
         }
 
-        int shieldScale = Math.max(2, u - 1);
+        int shieldScale = Math.max(3, u + 1);
         int shieldSz = 16 * shieldScale;
-        int sx = u * 3;
+        int sx = u * 4;
         int sy = (h - u - shieldSz) / 2;
         PixelSpriteAtlas.drawSprite(canvas, shieldSprite, sx, sy, shieldScale, palette.ink, ledColor, paint);
 
-        int palBtnW = PixelFont.measureMicroWidth(palette.shortName, m.microScale) + u * 13;
-        int palBtnH = u * 11;
-        paletteBtnLeft = w - u * 3 - palBtnW;
-        int palBtnTop = (h - u - palBtnH) / 2;
-        PixelDraw.drawNotchedBox(canvas, paletteBtnLeft, palBtnTop, w - u * 3, palBtnTop + palBtnH, u, palette.keyFace, palette.border, paint);
-
-        int ctrlScale = Math.max(1, u - 1);
+        int pillSc = m.microScale;
+        int pillTextH = PixelFont.lineHeight(pillSc);
+        int ctrlScale = Math.max(2, u - 1);
         int ctrlSz = 9 * ctrlScale;
+        int pillH = Math.max(pillTextH, ctrlSz) + u * 5;
+        int pillTop = (h - u - pillH) / 2;
+
+        int palTextW = PixelFont.measureWidth(palette.shortName, pillSc);
+        int palBtnW = ctrlSz + palTextW + u * 7;
+        paletteBtnLeft = w - u * 4 - palBtnW;
+        PixelDraw.drawNotchedBox(canvas, paletteBtnLeft, pillTop, w - u * 4, pillTop + pillH, u, palette.keyFace, palette.borderHi, paint);
         PixelSpriteAtlas.drawSprite(
             canvas,
             PixelSpriteAtlas.CTRL_PALETTE,
             paletteBtnLeft + u * 2,
-            palBtnTop + (palBtnH - ctrlSz) / 2,
+            pillTop + (pillH - ctrlSz) / 2,
             ctrlScale,
             palette.ink,
             palette.accent,
             paint
         );
-        PixelFont.drawMicro(
+        PixelFont.drawText(
             canvas,
             palette.shortName,
-            paletteBtnLeft + u * 3 + ctrlSz,
-            palBtnTop + (palBtnH - PixelFont.microHeight(m.microScale)) / 2,
-            m.microScale,
+            paletteBtnLeft + u * 4 + ctrlSz,
+            pillTop + (pillH - pillTextH) / 2,
+            pillSc,
             palette.ink,
             paint
         );
 
-        int hookPillW = PixelFont.measureMicroWidth(hooksBadge, m.microScale) + u * 8;
+        int ledSz = u * 3;
+        int hookTextW = PixelFont.measureWidth(hooksBadge, pillSc);
+        int hookPillW = ledSz + hookTextW + u * 7;
         int hookPillLeft = paletteBtnLeft - u * 2 - hookPillW;
-        PixelDraw.drawNotchedBox(canvas, hookPillLeft, palBtnTop, paletteBtnLeft - u * 2, palBtnTop + palBtnH, u, palette.well, ledColor, paint);
-        PixelDraw.drawLed(canvas, hookPillLeft + u * 2, palBtnTop + (palBtnH - u * 3) / 2, u * 3, u, ledColor, palette.border, paint);
-        PixelFont.drawMicro(
+        PixelDraw.drawNotchedBox(canvas, hookPillLeft, pillTop, paletteBtnLeft - u * 2, pillTop + pillH, u, palette.well, ledColor, paint);
+        PixelDraw.drawLed(canvas, hookPillLeft + u * 2, pillTop + (pillH - ledSz) / 2, ledSz, u, ledColor, palette.border, paint);
+        PixelFont.drawText(
             canvas,
             hooksBadge,
-            hookPillLeft + u * 6,
-            palBtnTop + (palBtnH - PixelFont.microHeight(m.microScale)) / 2,
-            m.microScale,
+            hookPillLeft + u * 4 + ledSz,
+            pillTop + (pillH - pillTextH) / 2,
+            pillSc,
             ledColor,
             paint
         );
 
-        int textLeft = sx + shieldSz + u * 3;
-        int textMaxW = Math.max(0, hookPillLeft - u * 2 - textLeft);
-        int titleSc = m.fontScale;
-        int microSc = m.microScale;
+        int textLeft = sx + shieldSz + u * 4;
+        int textMaxW = Math.max(0, hookPillLeft - u * 3 - textLeft);
+        String rawTitle = "ISOLPOLICY " + versionText;
+        int titleSc = PixelFont.measureWidth(rawTitle, m.fontScale) <= textMaxW ? m.fontScale : m.smallFontScale;
         int titleH = PixelFont.lineHeight(titleSc);
-        int subH = PixelFont.microHeight(microSc);
+        int subSc = m.microScale;
+        int subH = PixelFont.lineHeight(subSc);
         int totalH = titleH + u * 2 + subH;
         int topY = (h - u - totalH) / 2;
 
-        String title = PixelFont.fitText("ISOLPOLICY " + versionText, textMaxW, titleSc);
-        PixelFont.drawText(canvas, title, textLeft, topY, titleSc, palette.ink, paint);
-        String sub = PixelFont.fitMicro(subtitleLine, textMaxW, microSc);
-        PixelFont.drawMicro(canvas, sub, textLeft, topY + titleH + u * 2, microSc, palette.inkMuted, paint);
+        String title = PixelFont.fitText(rawTitle, textMaxW, titleSc);
+        PixelFont.drawTextWithShadow(canvas, title, textLeft, topY, titleSc, palette.ink, palette.shadow, paint);
+        String sub = PixelFont.fitText(subtitleLine, textMaxW, subSc);
+        PixelFont.drawText(canvas, sub, textLeft, topY + titleH + u * 2, subSc, palette.inkMuted, paint);
     }
 }

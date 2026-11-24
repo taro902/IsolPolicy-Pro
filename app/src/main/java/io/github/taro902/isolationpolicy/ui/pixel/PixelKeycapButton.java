@@ -21,11 +21,12 @@ public final class PixelKeycapButton extends View {
     private final PixelMetrics m;
     private final Paint paint = PixelDraw.newPixelPaint();
     private PixelPalette palette;
+    private PixelPalette previewPalette;
     private String label = "";
     private String fitted = "";
+    private int fittedScale = 3;
     private String[] iconSprite;
     private int state = STATE_OFF;
-    private int textScale;
     private boolean compact = false;
     private boolean pressedDown = false;
     private int lastFitWidth = -1;
@@ -34,7 +35,6 @@ public final class PixelKeycapButton extends View {
         super(ctx);
         this.m = metrics;
         this.palette = pal;
-        this.textScale = metrics.smallFontScale;
         setClickable(true);
         setFocusable(true);
     }
@@ -49,6 +49,12 @@ public final class PixelKeycapButton extends View {
 
     public void setPalette(PixelPalette pal) {
         this.palette = pal;
+        invalidate();
+    }
+
+    public void setPalettePreview(PixelPalette preview) {
+        this.previewPalette = preview;
+        this.lastFitWidth = -1;
         invalidate();
     }
 
@@ -82,20 +88,25 @@ public final class PixelKeycapButton extends View {
 
     public void setCompact(boolean isCompact) {
         this.compact = isCompact;
-        this.textScale = isCompact ? m.smallFontScale : m.fontScale;
         this.lastFitWidth = -1;
         requestLayout();
         invalidate();
     }
 
+    private int preferredScale() {
+        return compact ? m.microScale : m.smallFontScale;
+    }
+
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         int u = m.u;
-        int iconW = iconSprite != null ? (iconSprite[0].length() * Math.max(1, u - 1) + u * 2) : 0;
-        int textW = PixelFont.measureWidth(label, textScale);
-        int padX = compact ? u * 3 : u * 4;
-        int minW = textW + iconW + padX * 2 + u * 2;
-        int minH = compact ? (PixelFont.lineHeight(textScale) + u * 7) : (PixelFont.lineHeight(textScale) + u * 9);
+        int sc = preferredScale();
+        int iconSc = Math.max(2, u - 1);
+        int iconW = iconSprite != null ? (iconSprite[0].length() * iconSc + u * 2) : 0;
+        int swatchW = previewPalette != null ? (u * 10) : 0;
+        int textW = PixelFont.measureWidth(label, sc);
+        int minW = textW + iconW + swatchW + u * 8;
+        int minH = compact ? m.dp(40) : m.dp(46);
         setMeasuredDimension(resolveSize(minW, widthMeasureSpec), resolveSize(minH, heightMeasureSpec));
     }
 
@@ -199,29 +210,51 @@ public final class PixelKeycapButton extends View {
         int innerLeft = u * 2;
         int innerRight = w - u * 2;
         int innerW = innerRight - innerLeft;
-        int iconScale = Math.max(1, u - 1);
+
+        int iconScale = Math.max(2, u - 1);
         int iconPx = iconSprite != null ? iconSprite[0].length() * iconScale : 0;
-        int gap = (iconSprite != null && !label.isEmpty()) ? u * 2 : 0;
-        int maxTextW = Math.max(0, innerW - iconPx - gap);
+        int swatchW = previewPalette != null ? (u * 9) : 0;
+        int leadPx = previewPalette != null ? swatchW : iconPx;
+        int gap = (leadPx > 0 && !label.isEmpty()) ? u * 2 : 0;
+        int maxTextW = Math.max(0, innerW - leadPx - gap);
 
         if (maxTextW != lastFitWidth) {
-            fitted = PixelFont.fitText(label, maxTextW, textScale);
+            int pref = m.smallFontScale;
+            if (PixelFont.measureWidth(label, pref) <= maxTextW) {
+                fittedScale = pref;
+                fitted = label;
+            } else {
+                fittedScale = m.microScale;
+                fitted = PixelFont.fitText(label, maxTextW, fittedScale);
+            }
             lastFitWidth = maxTextW;
         }
 
-        int tw = PixelFont.measureWidth(fitted, textScale);
-        int totalW = iconPx + gap + tw;
+        int tw = PixelFont.measureWidth(fitted, fittedScale);
+        int totalW = leadPx + gap + tw;
         int startX = innerLeft + Math.max(0, (innerW - totalW) / 2);
         int centerY = capTop + (capBottom - capTop) / 2;
 
-        if (iconSprite != null) {
+        if (previewPalette != null) {
+            int swH = u * 4;
+            int swY = centerY - swH / 2;
+            paint.setColor(borderColor);
+            canvas.drawRect(startX, swY - u / 2, startX + u * 9, swY + swH + u / 2, paint);
+            paint.setColor(previewPalette.bg);
+            canvas.drawRect(startX + u / 2, swY, startX + u * 3, swY + swH, paint);
+            paint.setColor(previewPalette.surface);
+            canvas.drawRect(startX + u * 3, swY, startX + u * 6, swY + swH, paint);
+            paint.setColor(previewPalette.accent);
+            canvas.drawRect(startX + u * 6, swY, startX + u * 9 - u / 2, swY + swH, paint);
+            startX += swatchW + gap;
+        } else if (iconSprite != null) {
             int ih = iconSprite.length * iconScale;
             PixelSpriteAtlas.drawSprite(canvas, iconSprite, startX, centerY - ih / 2, iconScale, textColor, iconAccent, paint);
             startX += iconPx + gap;
         }
         if (!fitted.isEmpty()) {
-            int th = PixelFont.lineHeight(textScale);
-            PixelFont.drawText(canvas, fitted, startX, centerY - th / 2, textScale, textColor, paint);
+            int th = PixelFont.lineHeight(fittedScale);
+            PixelFont.drawText(canvas, fitted, startX, centerY - th / 2, fittedScale, textColor, paint);
         }
     }
 }

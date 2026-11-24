@@ -49,7 +49,7 @@ public final class PixelTagBarView extends View {
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         int u = m.u;
-        int h = PixelFont.microHeight(m.microScale) + u * 4;
+        int h = PixelFont.lineHeight(m.microScale) + u * 4;
         setMeasuredDimension(resolveSize(m.dp(240), widthMeasureSpec), resolveSize(h, heightMeasureSpec));
     }
 
@@ -62,12 +62,12 @@ public final class PixelTagBarView extends View {
         int h = getHeight();
         int u = m.u;
         int sc = m.microScale;
-        int th = PixelFont.microHeight(sc);
+        int th = PixelFont.lineHeight(sc);
         int x = 0;
 
         for (int i = 0; i < count; i++) {
             String lbl = labels[i];
-            int tw = PixelFont.measureMicroWidth(lbl, sc);
+            int tw = PixelFont.measureWidth(lbl, sc);
             int chipW = tw + u * 4;
             if (x + chipW > w) {
                 break;
@@ -104,7 +104,7 @@ public final class PixelTagBarView extends View {
                     break;
             }
             PixelDraw.drawNotchedBox(canvas, x, 0, x + chipW, h, u, bg, bdr, paint);
-            PixelFont.drawMicro(canvas, lbl, x + u * 2, (h - th) / 2, sc, fg, paint);
+            PixelFont.drawText(canvas, lbl, x + u * 2, (h - th) / 2, sc, fg, paint);
             x += chipW + u * 2;
         }
     }

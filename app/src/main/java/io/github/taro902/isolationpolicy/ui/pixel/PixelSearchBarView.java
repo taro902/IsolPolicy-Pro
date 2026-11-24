@@ -37,11 +37,12 @@ public final class PixelSearchBarView extends LinearLayout {
         setWillNotDraw(false);
         int u = m.u;
         setPadding(u * 3, u * 2, u * 2, u * 2);
+        setMinimumHeight(m.dp(48));
 
         iconSpacer = new View(ctx) {
             @Override
             protected void onDraw(Canvas canvas) {
-                int sc = Math.max(1, m.u - 1);
+                int sc = Math.max(2, m.u - 1);
                 int sz = 9 * sc;
                 PixelSpriteAtlas.drawSprite(
                     canvas,
@@ -55,24 +56,23 @@ public final class PixelSearchBarView extends LinearLayout {
                 );
             }
         };
-        addView(iconSpacer, new LayoutParams(u * 9, u * 9));
+        addView(iconSpacer, new LayoutParams(m.dp(30), m.dp(30)));
 
         input = new EditText(ctx);
         input.setBackgroundColor(0x00000000);
         input.setSingleLine(true);
         input.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
         input.setImeOptions(EditorInfo.IME_ACTION_SEARCH | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         input.setHint("SEARCH PACKAGE OR APP");
-        input.setPadding(u * 2, u, u * 2, u);
-        LayoutParams inputLp = new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f);
-        addView(input, inputLp);
+        input.setPadding(u * 2, u * 2, u * 2, u * 2);
+        addView(input, new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f));
 
         clearBtn = new View(ctx) {
             @Override
             protected void onDraw(Canvas canvas) {
-                int sc = Math.max(1, m.u - 1);
+                int sc = Math.max(2, m.u - 1);
                 int sz = 9 * sc;
                 PixelSpriteAtlas.drawSprite(
                     canvas,
@@ -87,13 +87,8 @@ public final class PixelSearchBarView extends LinearLayout {
             }
         };
         clearBtn.setVisibility(GONE);
-        clearBtn.setOnClickListener(new OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                input.setText("");
-            }
-        });
-        addView(clearBtn, new LayoutParams(u * 10, u * 9));
+        clearBtn.setOnClickListener(v -> input.setText(""));
+        addView(clearBtn, new LayoutParams(m.dp(34), m.dp(30)));
 
         input.addTextChangedListener(new TextWatcher() {
             @Override

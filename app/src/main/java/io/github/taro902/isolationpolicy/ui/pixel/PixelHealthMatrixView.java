@@ -46,9 +46,11 @@ public final class PixelHealthMatrixView extends View {
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         int u = m.u;
-        int rowH = u * 15;
-        int footerH = u * 10;
-        setMeasuredDimension(resolveSize(m.dp(340), widthMeasureSpec), resolveSize(rowH * 2 + footerH + u * 6, heightMeasureSpec));
+        int lh = PixelFont.lineHeight(m.microScale);
+        int cellH = lh * 3 + u * 10;
+        int footerH = lh + u * 7;
+        int totalH = cellH * 2 + u * 5 + footerH;
+        setMeasuredDimension(resolveSize(m.dp(340), widthMeasureSpec), resolveSize(totalH, heightMeasureSpec));
     }
 
     @Override
@@ -56,17 +58,18 @@ public final class PixelHealthMatrixView extends View {
         int w = getWidth();
         int h = getHeight();
         int u = m.u;
-        if (w < u * 25 || h < u * 24) {
+        if (w < u * 30 || h < u * 30) {
             return;
         }
 
+        int sc = m.microScale;
+        int lh = PixelFont.lineHeight(sc);
         int gap = u * 2;
-        int footerH = u * 9;
-        int gridH = h - footerH - gap;
+        int footerH = lh + u * 7;
+        int gridH = h - footerH - u * 3;
         int colW = (w - gap * 4) / 5;
         int rowH = (gridH - gap) / 2;
-        int sc = m.microScale;
-        int mh = PixelFont.microHeight(sc);
+        int ledSz = u * 3;
 
         for (int p = 0; p < PolicyFlags.PILLAR_COUNT; p++) {
             int row = p / 5;
@@ -98,34 +101,41 @@ public final class PixelHealthMatrixView extends View {
                     break;
             }
 
-            PixelDraw.drawNotchedBox(canvas, left, top, right, bottom, u, palette.well, st == TelemetryHub.HEALTH_TRIPPED ? palette.danger : palette.border, paint);
+            int bdr = st == TelemetryHub.HEALTH_TRIPPED ? palette.danger : (st == TelemetryHub.HEALTH_OK ? palette.borderHi : palette.border);
+            PixelDraw.drawNotchedBox(canvas, left, top, right, bottom, u, palette.well, bdr, paint);
 
-            PixelDraw.drawLed(canvas, left + u * 2, top + u * 2, u * 3, Math.max(1, u / 2), ledColor, palette.border, paint);
-            PixelFont.drawMicro(canvas, PolicyFlags.pillarCode(p), left + u * 6, top + u * 2, sc, palette.ink, paint);
+            int y1 = top + u * 3;
+            int y2 = y1 + lh + u * 2;
+            int y3 = y2 + lh + u * 2;
 
-            String midLine = stLabel + " T" + tiers[p];
-            PixelFont.drawMicro(canvas, PixelFont.fitMicro(midLine, colW - u * 4, sc), left + u * 2, top + u * 3 + mh + u, sc, ledColor, paint);
+            PixelDraw.drawLed(canvas, left + u * 2, y1 + Math.max(0, (lh - ledSz) / 2), ledSz, u, ledColor, palette.border, paint);
+            String code = PixelFont.fitText(PolicyFlags.pillarCode(p), colW - u * 6 - ledSz, sc);
+            PixelFont.drawText(canvas, code, left + u * 4 + ledSz, y1, sc, palette.ink, paint);
 
-            String fltLine = "F" + faults[p];
-            int fltColor = faults[p] > 0 ? palette.danger : palette.inkMuted;
-            PixelFont.drawMicro(canvas, fltLine, left + u * 2, bottom - u * 2 - mh, sc, fltColor, paint);
+            String midLine = PixelFont.fitText(stLabel + " T" + tiers[p], colW - u * 4, sc);
+            PixelFont.drawText(canvas, midLine, left + u * 2, y2, sc, ledColor, paint);
+
+            String fltLine = PixelFont.fitText("F" + faults[p], colW - u * 4, sc);
+            PixelFont.drawText(canvas, fltLine, left + u * 2, y3, sc, faults[p] > 0 ? palette.danger : palette.inkMuted, paint);
         }
 
-        int footTop = gridH + gap;
+        int footTop = gridH + u * 3;
         PixelDraw.drawRecessedWell(canvas, 0, footTop, w, h, u, palette, paint);
         boolean ipcReady = connected && ((healthMask & TelemetryHub.HEALTH_BIT_IPC_READY) != 0);
         boolean setReady = connected && ((healthMask & TelemetryHub.HEALTH_BIT_SETTINGS_READY) != 0);
 
-        int fy = footTop + (footerH - mh) / 2;
-        PixelDraw.drawLed(canvas, u * 3, footTop + (footerH - u * 3) / 2, u * 3, Math.max(1, u / 2), ipcReady ? palette.accent : palette.danger, palette.border, paint);
-        PixelFont.drawMicro(canvas, ipcReady ? "IPC OK" : "IPC WAIT", u * 7, fy, sc, ipcReady ? palette.accent : palette.danger, paint);
+        int fy = footTop + (footerH - lh) / 2;
+        int ledY = footTop + (footerH - ledSz) / 2;
 
-        int setX = w / 3;
-        PixelDraw.drawLed(canvas, setX, footTop + (footerH - u * 3) / 2, u * 3, Math.max(1, u / 2), setReady ? palette.accent : palette.warn, palette.border, paint);
-        PixelFont.drawMicro(canvas, setReady ? "SET OK" : "SET WAIT", setX + u * 4, fy, sc, setReady ? palette.accent : palette.warn, paint);
+        PixelDraw.drawLed(canvas, u * 3, ledY, ledSz, u, ipcReady ? palette.accent : palette.danger, palette.border, paint);
+        PixelFont.drawText(canvas, ipcReady ? "IPC OK" : "IPC WAIT", u * 5 + ledSz, fy, sc, ipcReady ? palette.accent : palette.danger, paint);
+
+        int setX = w * 38 / 100;
+        PixelDraw.drawLed(canvas, setX, ledY, ledSz, u, setReady ? palette.accent : palette.warn, palette.border, paint);
+        PixelFont.drawText(canvas, setReady ? "SET OK" : "SET WAIT", setX + u * 2 + ledSz, fy, sc, setReady ? palette.accent : palette.warn, paint);
 
         String rightMeta = "API " + apiVersion + "  GR " + graphCount;
-        int rw = PixelFont.measureMicroWidth(rightMeta, sc);
-        PixelFont.drawMicro(canvas, rightMeta, w - u * 3 - rw, fy, sc, palette.inkMuted, paint);
+        int rw = PixelFont.measureWidth(rightMeta, sc);
+        PixelFont.drawText(canvas, rightMeta, w - u * 3 - rw, fy, sc, palette.inkMuted, paint);
     }
 }

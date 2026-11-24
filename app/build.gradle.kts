@@ -10,8 +10,8 @@ android {
         applicationId = "io.github.taro902.isolationpolicy"
         minSdk = 29
         targetSdk = 36
-        versionCode = 6
-        versionName = "2.2.0"
+        versionCode = 7
+        versionName = "2.2.1"
     }
 
     buildFeatures {

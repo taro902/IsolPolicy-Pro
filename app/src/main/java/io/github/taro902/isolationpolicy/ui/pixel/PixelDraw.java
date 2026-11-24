@@ -120,14 +120,14 @@ public final class PixelDraw {
         boolean highlighted,
         Paint paint
     ) {
-        int r = right - u;
-        int b = bottom - u;
-        if (r - left < u * 4 || b - top < u * 4) {
+        int r = right - u * 2;
+        int b = bottom - u * 2;
+        if (r - left < u * 6 || b - top < u * 6) {
             return;
         }
         paint.setColor(pal.shadow);
-        canvas.drawRect(left + u, top + u * 2, right, bottom, paint);
-        canvas.drawRect(left + u * 2, b, right - u, bottom, paint);
+        canvas.drawRect(left + u * 2, top + u * 2, right, bottom, paint);
+        canvas.drawRect(left + u, b, right - u, bottom, paint);
 
         int bdr = highlighted ? pal.accent : pal.border;
         drawNotchedBox(canvas, left, top, r, b, u, pal.surface, bdr, paint);
@@ -161,14 +161,22 @@ public final class PixelDraw {
         int borderColor,
         Paint paint
     ) {
+        int b = Math.max(2, u / 2);
         paint.setColor(borderColor);
         canvas.drawRect(x, y, x + size, y + size, paint);
-        if (size > u * 2) {
+        if (size > b * 2) {
             paint.setColor(ledColor);
-            canvas.drawRect(x + u, y + u, x + size - u, y + size - u, paint);
+            canvas.drawRect(x + b, y + b, x + size - b, y + size - b, paint);
             paint.setColor(0x66FFFFFF);
-            canvas.drawRect(x + u, y + u, x + u * 2, y + u * 2, paint);
+            canvas.drawRect(x + b, y + b, x + b * 2, y + b * 2, paint);
         }
+    }
+
+    public static void drawRivet(Canvas canvas, int x, int y, int u, int hiColor, int loColor, Paint paint) {
+        paint.setColor(loColor);
+        canvas.drawRect(x, y, x + u * 2, y + u * 2, paint);
+        paint.setColor(hiColor);
+        canvas.drawRect(x, y, x + u, y + u, paint);
     }
 
     public static void drawDivider(

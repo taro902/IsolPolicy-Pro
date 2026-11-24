@@ -59,10 +59,7 @@ public final class PixelDockView extends View {
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        int u = m.u;
-        int iconSz = 14 * Math.max(2, u - 1);
-        int h = iconSz + PixelFont.microHeight(m.microScale) + u * 8;
-        setMeasuredDimension(resolveSize(m.dp(360), widthMeasureSpec), resolveSize(h, heightMeasureSpec));
+        setMeasuredDimension(resolveSize(m.dp(360), widthMeasureSpec), resolveSize(m.dp(64), heightMeasureSpec));
     }
 
     @Override
@@ -92,7 +89,7 @@ public final class PixelDockView extends View {
         int w = getWidth();
         int h = getHeight();
         int u = m.u;
-        if (w < u * 24 || h < u * 12) {
+        if (w < u * 24 || h < u * 16) {
             return;
         }
 
@@ -101,15 +98,16 @@ public final class PixelDockView extends View {
         PixelDraw.drawDivider(canvas, 0, 0, w, u, palette.border, paint);
 
         int slotW = w / 4;
-        int iconScale = Math.max(2, u - 1);
+        int iconScale = Math.max(3, u);
         int iconSz = 14 * iconScale;
-        int lblH = PixelFont.microHeight(m.microScale);
+        int lblSc = m.microScale;
+        int lblH = PixelFont.lineHeight(lblSc);
 
         for (int i = 0; i < 4; i++) {
-            int left = i * slotW + u;
-            int right = (i == 3 ? w : (i + 1) * slotW) - u;
+            int left = i * slotW + u * 2;
+            int right = (i == 3 ? w : (i + 1) * slotW) - u * 2;
             int top = u * 2;
-            int bottom = h - u;
+            int bottom = h - u * 2;
             boolean sel = (i == activeTab);
 
             if (sel) {
@@ -118,8 +116,8 @@ public final class PixelDockView extends View {
                 canvas.drawRect(left + u * 2, 0, right - u * 2, u * 2, paint);
             }
 
-            int totalH = iconSz + u + lblH;
-            int contentTop = top + (bottom - top - totalH) / 2;
+            int totalH = iconSz + u * 2 + lblH;
+            int contentTop = top + Math.max(u, (bottom - top - totalH) / 2);
             int cx = left + (right - left) / 2;
 
             int primary = sel ? palette.ink : palette.inkMuted;
@@ -127,11 +125,11 @@ public final class PixelDockView extends View {
             PixelSpriteAtlas.drawSprite(canvas, PixelSpriteAtlas.dockIcon(i), cx - iconSz / 2, contentTop, iconScale, primary, accent, paint);
 
             if (i == 1 && scopeHasEvents) {
-                PixelDraw.drawLed(canvas, cx + iconSz / 2 + u, contentTop, u * 2, Math.max(1, u / 2), palette.accent, palette.border, paint);
+                PixelDraw.drawLed(canvas, cx + iconSz / 2 + u, contentTop, u * 3, u, palette.accent, palette.border, paint);
             }
 
-            int tw = PixelFont.measureMicroWidth(TAB_LABELS[i], m.microScale);
-            PixelFont.drawMicro(canvas, TAB_LABELS[i], cx - tw / 2, contentTop + iconSz + u, m.microScale, sel ? palette.accent : palette.inkMuted, paint);
+            int tw = PixelFont.measureWidth(TAB_LABELS[i], lblSc);
+            PixelFont.drawText(canvas, TAB_LABELS[i], cx - tw / 2, contentTop + iconSz + u * 2, lblSc, sel ? palette.accent : palette.inkMuted, paint);
         }
     }
 }

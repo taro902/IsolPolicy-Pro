@@ -552,6 +552,7 @@ public final class MainActivity extends Activity {
             for (int col = 0; col < 3; col++) {
                 final int mode = r * 3 + col;
                 PixelKeycapButton pb = newKey(PixelPalette.of(mode).shortName, null, col < 2);
+                pb.setPalettePreview(PixelPalette.of(mode));
                 pb.setOnClickListener(v -> setThemeMode(mode));
                 paletteBtns[mode] = pb;
                 row.addView(pb);

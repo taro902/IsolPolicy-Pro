@@ -45,8 +45,10 @@ public final class PixelCoherenceBarView extends View {
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         int u = m.u;
-        int h = u * 26;
-        setMeasuredDimension(resolveSize(m.dp(340), widthMeasureSpec), resolveSize(h, heightMeasureSpec));
+        int lh = PixelFont.lineHeight(m.microScale);
+        int cellH = lh * 3 + u * 10;
+        int footH = lh + u * 5;
+        setMeasuredDimension(resolveSize(m.dp(340), widthMeasureSpec), resolveSize(cellH + footH + u * 2, heightMeasureSpec));
     }
 
     @Override
@@ -54,14 +56,14 @@ public final class PixelCoherenceBarView extends View {
         int w = getWidth();
         int h = getHeight();
         int u = m.u;
-        if (w < u * 25 || h < u * 20) {
+        if (w < u * 30 || h < u * 24) {
             return;
         }
 
         int sc = m.microScale;
-        int mh = PixelFont.microHeight(sc);
+        int lh = PixelFont.lineHeight(sc);
         int gap = u * 2;
-        int footH = mh + u * 4;
+        int footH = lh + u * 5;
         int gridH = h - footH - gap;
         int colW = (w - gap * 4) / 5;
 
@@ -73,33 +75,36 @@ public final class PixelCoherenceBarView extends View {
             hostA11y
         };
 
+        int y1 = u * 3;
+        int y2 = y1 + lh + u * 2;
+        int y3 = y2 + lh + u * 2;
+
         for (int i = 0; i < 5; i++) {
             int left = i * (colW + gap);
             int right = left + colW;
             PixelDraw.drawNotchedBox(canvas, left, 0, right, gridH, u, palette.well, palette.border, paint);
 
             int cx = left + colW / 2;
-            String lbl = PROBES[i];
-            int lw = PixelFont.measureMicroWidth(lbl, sc);
-            PixelFont.drawMicro(canvas, lbl, cx - lw / 2, u * 2, sc, palette.ink, paint);
+            String lbl = PixelFont.fitText(PROBES[i], colW - u * 4, sc);
+            PixelFont.drawText(canvas, lbl, cx - PixelFont.measureWidth(lbl, sc) / 2, y1, sc, palette.ink, paint);
 
             int hv = hostStates[i];
-            String hTxt = !connected || hv < 0 ? "NA" : (hv > 0 ? "H:ON" : "H:0");
+            String hTxt = !connected || hv < 0 ? "H:NA" : (hv > 0 ? "H:ON" : "H:0");
             int hCol = (!connected || hv < 0) ? palette.inkMuted : (hv > 0 ? palette.warn : palette.accent);
-            int hw = PixelFont.measureMicroWidth(hTxt, sc);
-            PixelFont.drawMicro(canvas, hTxt, cx - hw / 2, u * 4 + mh, sc, hCol, paint);
+            hTxt = PixelFont.fitText(hTxt, colW - u * 4, sc);
+            PixelFont.drawText(canvas, hTxt, cx - PixelFont.measureWidth(hTxt, sc) / 2, y2, sc, hCol, paint);
 
             String gTxt = connected ? "G:0" : "WAIT";
             int gCol = connected ? palette.accent : palette.danger;
-            int gw = PixelFont.measureMicroWidth(gTxt, sc);
-            PixelFont.drawMicro(canvas, gTxt, cx - gw / 2, gridH - u * 2 - mh, sc, gCol, paint);
+            gTxt = PixelFont.fitText(gTxt, colW - u * 4, sc);
+            PixelFont.drawText(canvas, gTxt, cx - PixelFont.measureWidth(gTxt, sc) / 2, y3, sc, gCol, paint);
         }
 
-        int fy = gridH + gap + u;
+        int fy = gridH + gap + u * 2;
         String leftFoot = "SELF APPID " + (selfAppId >= 10000 ? selfAppId : 0);
         String rightFoot = "ID GRAPH " + graphCount;
-        PixelFont.drawMicro(canvas, leftFoot, u, fy, sc, palette.inkMuted, paint);
-        int rw = PixelFont.measureMicroWidth(rightFoot, sc);
-        PixelFont.drawMicro(canvas, rightFoot, w - u - rw, fy, sc, palette.accent, paint);
+        PixelFont.drawText(canvas, leftFoot, u, fy, sc, palette.inkMuted, paint);
+        int rw = PixelFont.measureWidth(rightFoot, sc);
+        PixelFont.drawText(canvas, rightFoot, w - u - rw, fy, sc, palette.accent, paint);
     }
 }

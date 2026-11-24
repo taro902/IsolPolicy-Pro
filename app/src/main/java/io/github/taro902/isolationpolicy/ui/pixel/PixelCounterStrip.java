@@ -59,9 +59,8 @@ public final class PixelCounterStrip extends View {
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         int u = m.u;
-        int tileH = Math.max(u * 14, PixelFont.microHeight(m.microScale) * 2 + u * 7);
-        int totalH = tileH * 2 + u * 2;
-        setMeasuredDimension(resolveSize(m.dp(340), widthMeasureSpec), resolveSize(totalH, heightMeasureSpec));
+        int rowH = Math.max(m.dp(46), PixelFont.lineHeight(m.microScale) * 2 + u * 8);
+        setMeasuredDimension(resolveSize(m.dp(340), widthMeasureSpec), resolveSize(rowH * 2 + u * 2, heightMeasureSpec));
     }
 
     @Override
@@ -96,17 +95,18 @@ public final class PixelCounterStrip extends View {
         int w = getWidth();
         int h = getHeight();
         int u = m.u;
-        if (w < u * 25 || h < u * 16) {
+        if (w < u * 30 || h < u * 20) {
             return;
         }
 
         int gap = u * 2;
         int colW = (w - gap * 4) / 5;
         int rowH = (h - gap) / 2;
-        int iconScale = Math.max(1, u - 2);
+        int iconScale = Math.max(2, u - 1);
         int iconSz = 9 * iconScale;
         int sc = m.microScale;
-        int mh = PixelFont.microHeight(sc);
+        int lh = PixelFont.lineHeight(sc);
+        int ledSz = u * 3;
 
         for (int p = 0; p < PolicyFlags.PILLAR_COUNT; p++) {
             int row = p / 5;
@@ -126,7 +126,7 @@ public final class PixelCounterStrip extends View {
             PixelDraw.drawNotchedBox(canvas, left, top, right, bottom, u, bg, bdr, paint);
 
             int ledColor = e > 0 ? palette.accent : (a > 0 ? palette.audit : palette.border);
-            int topLineY = top + u * 2;
+            int topLineY = top + u * 3;
             PixelSpriteAtlas.drawSprite(
                 canvas,
                 PixelSpriteAtlas.pillarIcon(p),
@@ -138,16 +138,15 @@ public final class PixelCounterStrip extends View {
                 paint
             );
 
-            String code = PolicyFlags.pillarCode(p);
-            int codeX = left + u * 3 + iconSz;
-            PixelFont.drawMicro(canvas, code, codeX, topLineY + Math.max(0, (iconSz - mh) / 2), sc, sel ? palette.ink : palette.inkMuted, paint);
+            String code = PixelFont.fitText(PolicyFlags.pillarCode(p), colW - u * 5 - iconSz, sc);
+            PixelFont.drawText(canvas, code, left + u * 3 + iconSz, topLineY + Math.max(0, (iconSz - lh) / 2), sc, sel ? palette.ink : palette.inkMuted, paint);
 
             String numStr = formatCompactCount(total);
             int numColor = e > 0 ? palette.accent : (a > 0 ? palette.audit : palette.inkMuted);
-            int numY = bottom - u * 2 - mh;
-            PixelFont.drawMicro(canvas, numStr, left + u * 2, numY, sc, numColor, paint);
+            int numY = bottom - u * 3 - lh;
+            PixelFont.drawText(canvas, numStr, left + u * 2, numY, sc, numColor, paint);
 
-            PixelDraw.drawLed(canvas, right - u * 5, numY, u * 3, Math.max(1, u / 2), ledColor, palette.border, paint);
+            PixelDraw.drawLed(canvas, right - u * 2 - ledSz, numY + Math.max(0, (lh - ledSz) / 2), ledSz, u, ledColor, palette.border, paint);
         }
     }
 
