@@ -1094,8 +1094,8 @@ public final class MainActivity extends Activity {
         healthMatrixView.bind(s.connected, s.healthMask, s.pillarTiers, s.pillarFaults, s.apiVersion, s.graphCount);
         coherenceBarView.bind(s.connected, s.hostDev, s.hostAdb, s.hostAdbWifi, s.hostA11y, s.selfAppId, s.graphCount);
 
-        for (int s = 0; s < scaleBtns.length; s++) {
-            scaleBtns[s].setKeyState(s == uiScaleMode ? PixelKeycapButton.STATE_ON : PixelKeycapButton.STATE_OFF);
+        for (int scIdx = 0; scIdx < scaleBtns.length; scIdx++) {
+            scaleBtns[scIdx].setKeyState(scIdx == uiScaleMode ? PixelKeycapButton.STATE_ON : PixelKeycapButton.STATE_OFF);
         }
         for (int i = 0; i < paletteBtns.length; i++) {
             paletteBtns[i].setKeyState(i == themeMode ? PixelKeycapButton.STATE_ON : PixelKeycapButton.STATE_OFF);
