@@ -153,6 +153,7 @@ public final class UsbBroadcastShield {
             }
         }
 
+        CompatMatrix.deoptimizeCallers(module, usbCls, "isFunctionEnabled", "getCurrentFunctions", "getScreenUnlockedFunctions");
         hub.setPillarStatus(
             PolicyFlags.PILLAR_USB,
             installed > 0 ? (tier == CompatMatrix.TIER_FALLBACK ? TelemetryHub.HEALTH_FALLBACK : TelemetryHub.HEALTH_OK) : TelemetryHub.HEALTH_OFF,

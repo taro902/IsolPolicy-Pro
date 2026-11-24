@@ -7,6 +7,7 @@ import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import io.github.libxposed.api.XposedInterface;
 import io.github.taro902.isolationpolicy.core.Logger;
@@ -18,6 +19,7 @@ public final class CompatMatrix {
     public static final int TIER_OVERLOAD = 2;
     public static final int TIER_FALLBACK = 3;
 
+    private static final AtomicInteger DEOPT_SUCCESS_COUNT = new AtomicInteger(0);
     private static volatile Class<?> cachedParceledListClass;
     private static volatile Constructor<?> cachedParceledListCtor;
     private static volatile Method cachedParceledGetList;
@@ -39,6 +41,10 @@ public final class CompatMatrix {
         public boolean isResolved() {
             return targetClass != null && !methods.isEmpty() && tier != TIER_NONE;
         }
+    }
+
+    public static int getDeoptimizedCount() {
+        return DEOPT_SUCCESS_COUNT.get();
     }
 
     public static Class<?> findClass(ClassLoader cl, String... classNames) {
@@ -204,6 +210,7 @@ public final class CompatMatrix {
         int installed = 0;
         for (Method m : methods) {
             try {
+                tryDeoptimize(module, m);
                 module.hook(m)
                     .setPriority(priority)
                     .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
@@ -216,14 +223,35 @@ public final class CompatMatrix {
         return installed;
     }
 
-    public static void tryDeoptimize(XposedInterface module, Method m) {
+    public static boolean tryDeoptimize(XposedInterface module, Method m) {
         if (module == null || m == null) {
-            return;
+            return false;
         }
         try {
-            module.deoptimize(m);
+            boolean ok = module.deoptimize(m);
+            if (ok) {
+                DEOPT_SUCCESS_COUNT.incrementAndGet();
+            }
+            return ok;
         } catch (Throwable ignored) {
+            return false;
         }
+    }
+
+    public static int deoptimizeCallers(XposedInterface module, Class<?> cls, String... methodNames) {
+        if (module == null || cls == null || methodNames == null) {
+            return 0;
+        }
+        int count = 0;
+        for (String name : methodNames) {
+            List<Method> methods = findMethodsByName(cls, name);
+            for (Method m : methods) {
+                if (tryDeoptimize(module, m)) {
+                    count++;
+                }
+            }
+        }
+        return count;
     }
 
     public static List<?> extractParceledList(Object sliceOrList) {

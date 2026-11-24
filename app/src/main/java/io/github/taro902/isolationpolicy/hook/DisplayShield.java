@@ -139,6 +139,8 @@ public final class DisplayShield {
             }
         }
 
+        Class<?> dmsCls = CompatMatrix.findClass(cl, "com.android.server.display.DisplayManagerService");
+        CompatMatrix.deoptimizeCallers(module, dmsCls, "deliverDisplayEvent", "deliverDisplayEventLocked", "sendDisplayEventLocked");
         hub.setPillarStatus(
             PolicyFlags.PILLAR_DISP,
             installed > 0 ? TelemetryHub.HEALTH_OK : TelemetryHub.HEALTH_OFF,

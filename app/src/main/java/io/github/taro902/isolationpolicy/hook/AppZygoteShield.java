@@ -230,6 +230,9 @@ public final class AppZygoteShield {
             }
         });
 
+        Class<?> activeSvcCls = CompatMatrix.findClass(cl, "com.android.server.am.ActiveServices");
+        CompatMatrix.deoptimizeCallers(module, activeSvcCls, "bringUpServiceLocked");
+        CompatMatrix.deoptimizeCallers(module, processListCls, "startProcessLocked", "startProcess", "getIsolatedUidRangeLocked");
         if (hCreate > 0 && (hStart > 0 || hStartFb > 0)) {
             hub.setPillarStatus(PolicyFlags.PILLAR_AZ, TelemetryHub.HEALTH_OK, CompatMatrix.TIER_EXACT);
         } else if (hCreate > 0 || hStart > 0 || hStartFb > 0) {

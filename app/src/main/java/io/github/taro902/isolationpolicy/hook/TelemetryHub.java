@@ -45,6 +45,7 @@ public final class TelemetryHub {
     public static final String KEY_HOST_ADB = "host_adb";
     public static final String KEY_HOST_ADB_WIFI = "host_adb_wifi";
     public static final String KEY_HOST_A11Y = "host_a11y";
+    public static final String KEY_DEOPT_COUNT = "deopt_cnt";
 
     private final long[] ringTs = new long[RING_SIZE];
     private final int[] ringApp = new int[RING_SIZE];
@@ -460,6 +461,7 @@ public final class TelemetryHub {
         b.putInt(KEY_HOST_ADB, hostAdb);
         b.putInt(KEY_HOST_ADB_WIFI, hostAdbWifi);
         b.putInt(KEY_HOST_A11Y, hostA11y);
+        b.putInt(KEY_DEOPT_COUNT, CompatMatrix.getDeoptimizedCount());
         return b;
     }
 }

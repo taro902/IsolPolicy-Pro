@@ -14,10 +14,24 @@ import io.github.taro902.isolationpolicy.core.PolicyFlags;
 
 public final class AccessibilityShield {
 
-    private static final int A11Y_STATE_STRIP_MASK = 0x1B;
+    public static final int A11Y_STATE_STRIP_MASK = 0x1B;
     private static final int MAX_CLIENT_TRACK = 512;
 
     private AccessibilityShield() {
+    }
+
+    public static int extractStateFlags(long intPair) {
+        return (int) (intPair >>> 32);
+    }
+
+    public static int stripStateFlags(int stateFlags) {
+        return stateFlags & ~A11Y_STATE_STRIP_MASK;
+    }
+
+    public static long stripAddClientStatePair(long intPair) {
+        int state = extractStateFlags(intPair);
+        int clean = stripStateFlags(state);
+        return (((long) clean) << 32) | (intPair & 0xFFFFFFFFL);
     }
 
     public static void install(
@@ -61,17 +75,17 @@ public final class AccessibilityShield {
                     return ret;
                 }
                 long pair = (Long) ret;
-                int state = (int) (pair & 0xFFFFFFFFL);
-                if ((state & A11Y_STATE_STRIP_MASK) == 0) {
+                int state = extractStateFlags(pair);
+                int dirtyBits = state & A11Y_STATE_STRIP_MASK;
+                if (dirtyBits == 0) {
                     return ret;
                 }
                 if (PolicyFlags.isAuditOnly(flags)) {
-                    hub.record(effAppId, PolicyFlags.PILLAR_A11Y, PolicyFlags.VEC_A11Y_ADD_CLIENT, PolicyFlags.ACT_AUDIT, true, state & A11Y_STATE_STRIP_MASK);
+                    hub.record(effAppId, PolicyFlags.PILLAR_A11Y, PolicyFlags.VEC_A11Y_ADD_CLIENT, PolicyFlags.ACT_AUDIT, true, dirtyBits);
                     return ret;
                 }
-                int clean = state & ~A11Y_STATE_STRIP_MASK;
-                long patched = (pair & 0xFFFFFFFF00000000L) | (clean & 0xFFFFFFFFL);
-                hub.record(effAppId, PolicyFlags.PILLAR_A11Y, PolicyFlags.VEC_A11Y_ADD_CLIENT, PolicyFlags.ACT_SANITIZED, false, state & A11Y_STATE_STRIP_MASK);
+                long patched = stripAddClientStatePair(pair);
+                hub.record(effAppId, PolicyFlags.PILLAR_A11Y, PolicyFlags.VEC_A11Y_ADD_CLIENT, PolicyFlags.ACT_SANITIZED, false, dirtyBits);
                 return Long.valueOf(patched);
             }
         });
@@ -138,20 +152,30 @@ public final class AccessibilityShield {
                             return HookGuard.proceedOriginal(chain);
                         }
                         int state = (Integer) args.get(0);
-                        if ((state & A11Y_STATE_STRIP_MASK) == 0) {
+                        int dirtyBits = state & A11Y_STATE_STRIP_MASK;
+                        if (dirtyBits == 0) {
                             return HookGuard.proceedOriginal(chain);
                         }
                         if (PolicyFlags.isAuditOnly(flags)) {
-                            hub.record(ownerAppId, PolicyFlags.PILLAR_A11Y, PolicyFlags.VEC_A11Y_PUSH_STATE, PolicyFlags.ACT_AUDIT, true, state & A11Y_STATE_STRIP_MASK);
+                            hub.record(ownerAppId, PolicyFlags.PILLAR_A11Y, PolicyFlags.VEC_A11Y_PUSH_STATE, PolicyFlags.ACT_AUDIT, true, dirtyBits);
                             return HookGuard.proceedOriginal(chain);
                         }
-                        int clean = state & ~A11Y_STATE_STRIP_MASK;
-                        hub.record(ownerAppId, PolicyFlags.PILLAR_A11Y, PolicyFlags.VEC_A11Y_PUSH_STATE, PolicyFlags.ACT_SANITIZED, false, state & A11Y_STATE_STRIP_MASK);
+                        int clean = stripStateFlags(state);
+                        hub.record(ownerAppId, PolicyFlags.PILLAR_A11Y, PolicyFlags.VEC_A11Y_PUSH_STATE, PolicyFlags.ACT_SANITIZED, false, dirtyBits);
                         return HookGuard.proceedWithArgs(chain, new Object[]{Integer.valueOf(clean)});
                     }
                 });
             }
         }
+
+        CompatMatrix.deoptimizeCallers(
+            module,
+            amsCls,
+            "sendStateToClients",
+            "sendStateToAllClients",
+            "updateClientsLocked",
+            "notifyClientsOfServicesStateChange"
+        );
 
         hub.setPillarStatus(
             PolicyFlags.PILLAR_A11Y,

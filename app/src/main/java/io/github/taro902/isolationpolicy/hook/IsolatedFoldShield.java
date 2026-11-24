@@ -1,5 +1,6 @@
 package io.github.taro902.isolationpolicy.hook;
 
+import android.content.ComponentName;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.ServiceInfo;
 
@@ -15,6 +16,16 @@ import io.github.taro902.isolationpolicy.core.PolicyFlags;
 public final class IsolatedFoldShield {
 
     private IsolatedFoldShield() {
+    }
+
+    public static boolean isDynamicIsolatedInstance(String declaredClassName, String instanceClassName) {
+        if (instanceClassName == null || instanceClassName.isEmpty()) {
+            return false;
+        }
+        if (declaredClassName != null && !declaredClassName.isEmpty() && !declaredClassName.equals(instanceClassName)) {
+            return true;
+        }
+        return instanceClassName.indexOf(':') >= 0;
     }
 
     public static void install(
@@ -34,7 +45,9 @@ public final class IsolatedFoldShield {
         final Field fAppInfo = CompatMatrix.findField(serviceRecordCls, "appInfo");
         final Field fPkgName = CompatMatrix.findField(serviceRecordCls, "packageName");
         final Field fProcName = CompatMatrix.findField(serviceRecordCls, "processName");
+        final Field fName = CompatMatrix.findField(serviceRecordCls, "name");
         final Field fInstanceName = CompatMatrix.findField(serviceRecordCls, "instanceName");
+        final Field fIsolatedProc = CompatMatrix.findField(serviceRecordCls, "isolatedProc");
 
         List<Method> all = CompatMatrix.findMethodsByName(activeServicesCls, "bringUpServiceLocked");
         List<Method> filtered = new ArrayList<Method>(all.size());
@@ -80,11 +93,11 @@ public final class IsolatedFoldShield {
                 if (isProtectedRenderer(pkg, si.processName, si.name)) {
                     return HookGuard.proceedOriginal(chain);
                 }
-                if (fInstanceName != null) {
-                    Object inst = fInstanceName.get(sr);
-                    if (inst instanceof String && !((String) inst).isEmpty()) {
-                        return HookGuard.proceedOriginal(chain);
-                    }
+                if (isDynamicRecord(sr, fName, fInstanceName, si.name)) {
+                    return HookGuard.proceedOriginal(chain);
+                }
+                if (fIsolatedProc != null && fIsolatedProc.get(sr) != null) {
+                    return HookGuard.proceedOriginal(chain);
                 }
                 if ((si.flags & ServiceInfo.FLAG_USE_APP_ZYGOTE) != 0
                     && PolicyFlags.azMode(flags) == PolicyFlags.AZ_OFF
@@ -118,11 +131,42 @@ public final class IsolatedFoldShield {
             }
         });
 
+        CompatMatrix.deoptimizeCallers(
+            module,
+            activeServicesCls,
+            "startServiceInnerLocked",
+            "bindServiceLocked",
+            "bringUpServiceLocked"
+        );
+
         hub.setPillarStatus(
             PolicyFlags.PILLAR_ISO,
             count > 0 ? TelemetryHub.HEALTH_OK : TelemetryHub.HEALTH_OFF,
             count > 0 ? CompatMatrix.TIER_OVERLOAD : CompatMatrix.TIER_NONE
         );
+    }
+
+    private static boolean isDynamicRecord(Object sr, Field fName, Field fInstanceName, String fallbackDeclName) {
+        try {
+            Object declObj = fName != null ? fName.get(sr) : null;
+            Object instObj = fInstanceName != null ? fInstanceName.get(sr) : null;
+            if (declObj instanceof ComponentName && instObj instanceof ComponentName) {
+                ComponentName decl = (ComponentName) declObj;
+                ComponentName inst = (ComponentName) instObj;
+                if (!decl.equals(inst)) {
+                    return true;
+                }
+                return isDynamicIsolatedInstance(decl.getClassName(), inst.getClassName());
+            }
+            if (instObj instanceof ComponentName) {
+                return isDynamicIsolatedInstance(fallbackDeclName, ((ComponentName) instObj).getClassName());
+            }
+            if (instObj instanceof String) {
+                return isDynamicIsolatedInstance(fallbackDeclName, (String) instObj);
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
     }
 
     public static boolean isProtectedRenderer(String pkg, String procName, String svcName) {

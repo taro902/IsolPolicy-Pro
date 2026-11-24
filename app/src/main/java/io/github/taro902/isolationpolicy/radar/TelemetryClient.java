@@ -59,6 +59,7 @@ public final class TelemetryClient {
         public final int hostAdb;
         public final int hostAdbWifi;
         public final int hostA11y;
+        public final int deoptCount;
         public final List<EventRow> events;
         public final Map<Integer, long[]> appPillarMatrix;
         public final Map<Integer, Long> appAuditTotals;
@@ -80,6 +81,7 @@ public final class TelemetryClient {
             int hostAdb,
             int hostAdbWifi,
             int hostA11y,
+            int deoptCount,
             List<EventRow> events,
             Map<Integer, long[]> appPillarMatrix,
             Map<Integer, Long> appAuditTotals
@@ -100,6 +102,7 @@ public final class TelemetryClient {
             this.hostAdb = hostAdb;
             this.hostAdbWifi = hostAdbWifi;
             this.hostA11y = hostA11y;
+            this.deoptCount = deoptCount;
             this.events = events != null ? Collections.unmodifiableList(events) : Collections.<EventRow>emptyList();
             this.appPillarMatrix = appPillarMatrix != null ? Collections.unmodifiableMap(appPillarMatrix) : Collections.<Integer, long[]>emptyMap();
             this.appAuditTotals = appAuditTotals != null ? Collections.unmodifiableMap(appAuditTotals) : Collections.<Integer, Long>emptyMap();
@@ -123,6 +126,7 @@ public final class TelemetryClient {
                 -1,
                 -1,
                 -1,
+                0,
                 Collections.<EventRow>emptyList(),
                 Collections.<Integer, long[]>emptyMap(),
                 Collections.<Integer, Long>emptyMap()
@@ -273,6 +277,7 @@ public final class TelemetryClient {
         int hostAdb = res.getInt(TelemetryHub.KEY_HOST_ADB, -1);
         int hostWifi = res.getInt(TelemetryHub.KEY_HOST_ADB_WIFI, -1);
         int hostA11y = res.getInt(TelemetryHub.KEY_HOST_A11Y, -1);
+        int deoptCount = res.getInt(TelemetryHub.KEY_DEOPT_COUNT, 0);
 
         long[] rTs = res.getLongArray(TelemetryHub.KEY_RING_TS);
         int[] rApp = res.getIntArray(TelemetryHub.KEY_RING_APP);
@@ -323,6 +328,7 @@ public final class TelemetryClient {
             hostAdb,
             hostWifi,
             hostA11y,
+            deoptCount,
             rows,
             matrixMap,
             auditMap

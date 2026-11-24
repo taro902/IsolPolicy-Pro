@@ -1124,7 +1124,7 @@ public final class MainActivity extends Activity {
 
         if (s.connected) {
             infoIpcTxt.setColorRole(PixelTextView.ROLE_ACCENT);
-            infoIpcTxt.setText("IPC AUTHENTICATED  SNAP V" + s.snapshotVersion + "  HOOKS " + s.healthyPillarCount() + "/10");
+            infoIpcTxt.setText("IPC OK  SNAP V" + s.snapshotVersion + "  HOOKS " + s.healthyPillarCount() + "/10  DEOPT " + s.deoptCount);
         } else {
             infoIpcTxt.setColorRole(PixelTextView.ROLE_WARN);
             infoIpcTxt.setText("IPC OFFLINE  ENABLE IN LSPOSED AND REBOOT");

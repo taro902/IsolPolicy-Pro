@@ -83,6 +83,8 @@ public final class ObserverCoherenceShield {
                     }
                 });
                 if (cnt > 0) {
+                    Class<?> csOwner = CompatMatrix.findClass(cl, "com.android.server.content.ContentService");
+                    CompatMatrix.deoptimizeCallers(module, csOwner, "notifyChange", "notifyChangeAsUser");
                     hub.setPillarStatus(PolicyFlags.PILLAR_OBS, TelemetryHub.HEALTH_OK, CompatMatrix.TIER_EXACT);
                     return;
                 }
