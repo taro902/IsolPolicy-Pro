@@ -89,6 +89,7 @@ public final class MainActivity extends Activity {
     private volatile SharedPreferences remotePrefs;
 
     private int themeMode = PixelPalette.MODE_CRT;
+    private int uiScaleMode = PixelMetrics.SCALE_BALANCED;
     private boolean pixelIcons = true;
     private boolean hapticEnabled = true;
     private boolean showSystemApps = false;
@@ -140,6 +141,7 @@ public final class MainActivity extends Activity {
     private PixelHealthMatrixView healthMatrixView;
     private PixelCoherenceBarView coherenceBarView;
     private PixelKeycapButton[] paletteBtns;
+    private PixelKeycapButton[] scaleBtns;
     private PixelKeycapButton btnToggleIcons;
     private PixelKeycapButton btnToggleHaptic;
     private PixelKeycapButton btnPollRate;
@@ -181,8 +183,10 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        m = PixelMetrics.from(this);
         uiPrefs = getSharedPreferences(PolicyFlags.UI_PREFS, MODE_PRIVATE);
+        uiScaleMode = PixelMetrics.clampScaleMode(uiPrefs.getInt(PolicyFlags.KEY_UI_SCALE, PixelMetrics.SCALE_BALANCED));
+        m = PixelMetrics.from(this, uiScaleMode);
+        int restoredTab = savedInstanceState != null ? savedInstanceState.getInt("active_tab", 0) : 0;
         themeMode = uiPrefs.getInt(PolicyFlags.KEY_UI_THEME, PixelPalette.MODE_CRT);
         pixelIcons = uiPrefs.getBoolean(PolicyFlags.KEY_UI_PIXEL_ICON, true);
         hapticEnabled = uiPrefs.getBoolean(PolicyFlags.KEY_UI_HAPTIC, true);
@@ -192,6 +196,7 @@ public final class MainActivity extends Activity {
         PixelKeycapButton.setHapticsEnabled(hapticEnabled);
 
         buildLayout();
+        switchTab(restoredTab);
         setContentView(rootLayout);
         applySystemBarColors();
 
@@ -558,6 +563,16 @@ public final class MainActivity extends Activity {
                 row.addView(pb);
             }
         }
+        LinearLayout scRow = newRow(pDisp, u * 3);
+        scaleBtns = new PixelKeycapButton[PixelMetrics.SCALE_COUNT];
+        String[] scLabels = {"SCALE S", "SCALE M", "SCALE L"};
+        for (int s = 0; s < PixelMetrics.SCALE_COUNT; s++) {
+            final int sm = s;
+            PixelKeycapButton sb = newKey(scLabels[s], null, s < 2);
+            sb.setOnClickListener(v -> setUiScaleMode(sm));
+            scaleBtns[s] = sb;
+            scRow.addView(sb);
+        }
         LinearLayout o1 = newRow(pDisp, u * 3);
         btnToggleIcons = newKey("ICON PIXEL-16", null, true);
         btnToggleIcons.setOnClickListener(v -> {
@@ -705,6 +720,22 @@ public final class MainActivity extends Activity {
         } else if (tab == 3) {
             refreshVaultPanel();
         }
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putInt("active_tab", activeTab);
+    }
+
+    private void setUiScaleMode(int mode) {
+        int clamped = PixelMetrics.clampScaleMode(mode);
+        if (clamped == uiScaleMode) {
+            return;
+        }
+        uiScaleMode = clamped;
+        uiPrefs.edit().putInt(PolicyFlags.KEY_UI_SCALE, clamped).apply();
+        recreate();
     }
 
     private void setThemeMode(int mode) {
@@ -1063,6 +1094,9 @@ public final class MainActivity extends Activity {
         healthMatrixView.bind(s.connected, s.healthMask, s.pillarTiers, s.pillarFaults, s.apiVersion, s.graphCount);
         coherenceBarView.bind(s.connected, s.hostDev, s.hostAdb, s.hostAdbWifi, s.hostA11y, s.selfAppId, s.graphCount);
 
+        for (int s = 0; s < scaleBtns.length; s++) {
+            scaleBtns[s].setKeyState(s == uiScaleMode ? PixelKeycapButton.STATE_ON : PixelKeycapButton.STATE_OFF);
+        }
         for (int i = 0; i < paletteBtns.length; i++) {
             paletteBtns[i].setKeyState(i == themeMode ? PixelKeycapButton.STATE_ON : PixelKeycapButton.STATE_OFF);
         }

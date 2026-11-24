@@ -59,7 +59,7 @@ public final class PixelDockView extends View {
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        setMeasuredDimension(resolveSize(m.dp(360), widthMeasureSpec), resolveSize(m.dp(64), heightMeasureSpec));
+        setMeasuredDimension(resolveSize(m.dp(360), widthMeasureSpec), resolveSize(m.dockHeight(), heightMeasureSpec));
     }
 
     @Override
@@ -112,6 +112,7 @@ public final class PixelDockView extends View {
 
             if (sel) {
                 PixelDraw.drawNotchedBox(canvas, left, top, right, bottom, u, palette.accentDim, palette.accent, paint);
+                PixelDraw.drawBayerFill(canvas, left + u, top + u, right - u, bottom - u, palette.accentDim, palette.ditherDot, 3, u, paint);
                 paint.setColor(palette.accent);
                 canvas.drawRect(left + u * 2, 0, right - u * 2, u * 2, paint);
             }

@@ -50,6 +50,7 @@ public final class PolicyFlags {
     public static final String KEY_UI_POLL_MS = "poll_ms";
     public static final String KEY_UI_SHOW_SYS = "show_sys";
     public static final String KEY_UI_HAPTIC = "haptic_keycap";
+    public static final String KEY_UI_SCALE = "ui_scale";
     public static final String KEY_LOCAL_POLICY = "local_policy_backup";
 
     public static final int PILLAR_AZ = 0;

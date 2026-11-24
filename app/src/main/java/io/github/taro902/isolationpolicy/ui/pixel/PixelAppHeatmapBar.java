@@ -47,7 +47,7 @@ public final class PixelAppHeatmapBar extends View {
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        setMeasuredDimension(resolveSize(m.dp(320), widthMeasureSpec), resolveSize(m.dp(122), heightMeasureSpec));
+        setMeasuredDimension(resolveSize(m.dp(320), widthMeasureSpec), resolveSize(m.heatmapHeight(), heightMeasureSpec));
     }
 
     @Override

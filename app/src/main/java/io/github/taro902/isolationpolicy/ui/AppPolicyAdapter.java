@@ -509,7 +509,7 @@ public final class AppPolicyAdapter extends RecyclerView.Adapter<AppPolicyAdapte
             ));
 
             iconView = new PixelIconView(ctx, m, pal);
-            int iconPx = m.dp(48);
+            int iconPx = m.iconSize();
             LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(iconPx, iconPx);
             iconLp.rightMargin = u * 3;
             topArea.addView(iconView, iconLp);

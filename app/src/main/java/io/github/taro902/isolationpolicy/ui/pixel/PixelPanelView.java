@@ -46,13 +46,13 @@ public final class PixelPanelView extends LinearLayout {
         if (headerTitle.isEmpty() && headerRight.isEmpty()) {
             return 0;
         }
-        return PixelFont.lineHeight(m.smallFontScale) + m.u * 7;
+        return PixelFont.lineHeight(m.smallFontScale) + m.u * 6;
     }
 
     private void updatePadding() {
         int u = m.u;
         int topExtra = headerHeight();
-        setPadding(u * 4, u * 4 + topExtra, u * 6, u * 6);
+        setPadding(u * 4, u * 3 + topExtra, u * 5, u * 4);
     }
 
     @Override
@@ -69,16 +69,17 @@ public final class PixelPanelView extends LinearLayout {
         if (hh > 0) {
             int barLeft = u;
             int barTop = u;
-            int barRight = w - u * 3;
+            int barRight = w - u * 2;
             int barBottom = barTop + hh;
-            PixelDraw.drawBayerFill(canvas, barLeft, barTop, barRight, barBottom, palette.surfaceAlt, palette.ditherDot, 4, u, paint);
+            PixelDraw.drawBayerFill(canvas, barLeft, barTop, barRight, barBottom, palette.surfaceAlt, palette.ditherDot, 3, u, paint);
             PixelDraw.drawDivider(canvas, barLeft, barBottom - u, barRight, u, palette.border, paint);
 
             int rvY = barTop + (hh - u - u * 2) / 2;
             PixelDraw.drawRivet(canvas, barLeft + u * 2, rvY, u, palette.borderHi, palette.shadow, paint);
+            PixelDraw.drawRivet(canvas, barRight - u * 4, rvY, u, palette.borderHi, palette.shadow, paint);
 
             int rw = !headerRight.isEmpty() ? PixelFont.measureWidth(headerRight, m.microScale) : 0;
-            int rightReserve = rw > 0 ? (rw + u * 5) : (u * 3);
+            int rightReserve = rw > 0 ? (rw + u * 7) : (u * 6);
             int titleLeft = barLeft + u * 6;
             int maxTitleW = Math.max(0, barRight - rightReserve - titleLeft);
 
@@ -90,7 +91,7 @@ public final class PixelPanelView extends LinearLayout {
             }
             if (!headerRight.isEmpty()) {
                 int ry = barTop + (hh - u - PixelFont.lineHeight(m.microScale)) / 2;
-                PixelFont.drawText(canvas, headerRight, barRight - u * 3 - rw, ry, m.microScale, palette.inkMuted, paint);
+                PixelFont.drawText(canvas, headerRight, barRight - u * 6 - rw, ry, m.microScale, palette.inkMuted, paint);
             }
         }
     }

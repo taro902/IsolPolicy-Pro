@@ -93,20 +93,16 @@ public final class PixelKeycapButton extends View {
         invalidate();
     }
 
-    private int preferredScale() {
-        return compact ? m.microScale : m.smallFontScale;
-    }
-
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         int u = m.u;
-        int sc = preferredScale();
+        int sc = compact ? m.microScale : m.smallFontScale;
         int iconSc = Math.max(2, u - 1);
         int iconW = iconSprite != null ? (iconSprite[0].length() * iconSc + u * 2) : 0;
         int swatchW = previewPalette != null ? (u * 10) : 0;
         int textW = PixelFont.measureWidth(label, sc);
         int minW = textW + iconW + swatchW + u * 8;
-        int minH = compact ? m.dp(40) : m.dp(46);
+        int minH = m.keycapHeight(compact);
         setMeasuredDimension(resolveSize(minW, widthMeasureSpec), resolveSize(minH, heightMeasureSpec));
     }
 
@@ -202,9 +198,13 @@ public final class PixelKeycapButton extends View {
 
         PixelDraw.drawNotchedBox(canvas, 0, capTop, w, capBottom, u, faceColor, borderColor, paint);
 
-        if (state == STATE_OFF && isEnabled()) {
-            paint.setColor(palette.borderHi);
+        if (isEnabled()) {
+            paint.setColor(state == STATE_OFF ? palette.borderHi : 0x33FFFFFF);
             canvas.drawRect(u * 2, capTop + u, w - u * 2, capTop + u * 2, paint);
+            if (state != STATE_OFF && previewPalette == null && w > u * 16) {
+                paint.setColor(0x88FFFFFF);
+                canvas.drawRect(w - u * 4, capTop + u * 2, w - u * 2, capTop + u * 3, paint);
+            }
         }
 
         int innerLeft = u * 2;

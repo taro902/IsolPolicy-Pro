@@ -3,6 +3,7 @@ package io.github.taro902.isolationpolicy;
 import org.junit.Test;
 
 import io.github.taro902.isolationpolicy.ui.pixel.PixelFont;
+import io.github.taro902.isolationpolicy.ui.pixel.PixelMetrics;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -50,5 +51,17 @@ public final class PixelFontTest {
         assertEquals(44, PixelFont.measureWidth("AB", 4));
         assertEquals(28, PixelFont.lineHeight(4));
         assertEquals("ISOL..", PixelFont.fitText("ISOLPOLICY", 145, 4));
+    }
+
+    @Test
+    public void testUiScaleModeClampingAndLabels() {
+        assertEquals(PixelMetrics.SCALE_COMPACT, PixelMetrics.clampScaleMode(-5));
+        assertEquals(PixelMetrics.SCALE_COMPACT, PixelMetrics.clampScaleMode(0));
+        assertEquals(PixelMetrics.SCALE_BALANCED, PixelMetrics.clampScaleMode(1));
+        assertEquals(PixelMetrics.SCALE_LARGE, PixelMetrics.clampScaleMode(2));
+        assertEquals(PixelMetrics.SCALE_LARGE, PixelMetrics.clampScaleMode(9));
+        assertEquals("COMPACT", PixelMetrics.scaleLabel(0));
+        assertEquals("BALANCED", PixelMetrics.scaleLabel(1));
+        assertEquals("LARGE", PixelMetrics.scaleLabel(2));
     }
 }

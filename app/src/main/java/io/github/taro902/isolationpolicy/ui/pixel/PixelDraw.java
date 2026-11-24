@@ -120,14 +120,14 @@ public final class PixelDraw {
         boolean highlighted,
         Paint paint
     ) {
-        int r = right - u * 2;
-        int b = bottom - u * 2;
-        if (r - left < u * 6 || b - top < u * 6) {
+        int r = right - u;
+        int b = bottom - u;
+        if (r - left < u * 5 || b - top < u * 5) {
             return;
         }
         paint.setColor(pal.shadow);
-        canvas.drawRect(left + u * 2, top + u * 2, right, bottom, paint);
-        canvas.drawRect(left + u, b, right - u, bottom, paint);
+        canvas.drawRect(left + u, top + u * 2, right, bottom, paint);
+        canvas.drawRect(left + u * 2, b, right - u, bottom, paint);
 
         int bdr = highlighted ? pal.accent : pal.border;
         drawNotchedBox(canvas, left, top, r, b, u, pal.surface, bdr, paint);

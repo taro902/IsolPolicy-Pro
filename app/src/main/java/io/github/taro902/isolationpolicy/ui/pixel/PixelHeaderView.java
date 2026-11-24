@@ -26,7 +26,7 @@ public final class PixelHeaderView extends View {
     private OnPaletteTapListener paletteListener;
 
     private int status = STATUS_OFFLINE;
-    private String versionText = "2.2.1";
+    private String versionText = "2.2.2";
     private String subtitleLine = "IPC WAIT  GUARD 0";
     private String hooksBadge = "0/10";
     private int paletteBtnLeft = 0;
@@ -56,7 +56,7 @@ public final class PixelHeaderView extends View {
         long enforcedHits,
         long auditHits
     ) {
-        this.versionText = (version != null && !version.isEmpty()) ? version : "2.2.1";
+        this.versionText = (version != null && !version.isEmpty()) ? version : "2.2.2";
         this.hooksBadge = healthyHooks + "/" + PolicyFlags.PILLAR_COUNT;
         if (!connected) {
             this.status = STATUS_OFFLINE;
@@ -76,8 +76,7 @@ public final class PixelHeaderView extends View {
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        int h = m.dp(68);
-        setMeasuredDimension(resolveSize(m.dp(360), widthMeasureSpec), resolveSize(h, heightMeasureSpec));
+        setMeasuredDimension(resolveSize(m.dp(360), widthMeasureSpec), resolveSize(m.headerHeight(), heightMeasureSpec));
     }
 
     @Override

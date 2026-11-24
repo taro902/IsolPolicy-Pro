@@ -93,7 +93,7 @@ public final class PixelScopeView extends View {
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        setMeasuredDimension(resolveSize(m.dp(340), widthMeasureSpec), resolveSize(m.dp(158), heightMeasureSpec));
+        setMeasuredDimension(resolveSize(m.dp(340), widthMeasureSpec), resolveSize(m.scopeHeight(), heightMeasureSpec));
     }
 
     @Override

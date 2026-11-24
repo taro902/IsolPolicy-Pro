@@ -37,7 +37,7 @@ public final class PixelSearchBarView extends LinearLayout {
         setWillNotDraw(false);
         int u = m.u;
         setPadding(u * 3, u * 2, u * 2, u * 2);
-        setMinimumHeight(m.dp(48));
+        setMinimumHeight(m.searchHeight());
 
         iconSpacer = new View(ctx) {
             @Override
@@ -62,7 +62,7 @@ public final class PixelSearchBarView extends LinearLayout {
         input.setBackgroundColor(0x00000000);
         input.setSingleLine(true);
         input.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, m.searchTextSp());
         input.setImeOptions(EditorInfo.IME_ACTION_SEARCH | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         input.setHint("SEARCH PACKAGE OR APP");
